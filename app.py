@@ -13,8 +13,8 @@ import pandas as pd
 import streamlit as st
 
 from overtime.calc import DaySummary, month_totals, summarize_month
-from overtime.loader import LoaderError, load_attendance
-from overtime.rules import THRESHOLDS, load_holidays
+from overtime.loader import load_attendance
+from overtime.rules import load_holidays
 
 DATA_DIR = Path("data")
 HOLIDAYS_FILE = "holidays.yml"
@@ -51,8 +51,8 @@ month = (month_dt.year, month_dt.month)
 try:
     holidays = load_holidays(HOLIDAYS_FILE)
     sheets = load_attendance(months[month_name])
-except (LoaderError, OSError, KeyError) as e:
-    st.error(f"Failed to load data: {e}")
+except Exception as e:
+    st.error(f"Failed to load data: {type(e).__name__}: {e}")
     st.stop()
 
 month_hols = {d: n for d, n in holidays.items() if (d.year, d.month) == month}
@@ -102,8 +102,25 @@ st.dataframe(detail_frame(all_days[who]), use_container_width=True, hide_index=T
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as xw:
     summary_df.to_excel(xw, sheet_name="Summary", index=False)
+
+    used_sheets = {"Summary"}
     for name, days in all_days.items():
-        detail_frame(days).to_excel(xw, sheet_name=name[:31], index=False)
+        # Generate collision-safe sheet name (max 31 chars)
+        sheet_name = name[:31]
+        if sheet_name not in used_sheets:
+            used_sheets.add(sheet_name)
+        else:
+            # Collision: append numeric suffix, re-truncate to stay <= 31 chars
+            suffix_num = 2
+            while True:
+                suffix = f"~{suffix_num}"
+                sheet_name = name[:31 - len(suffix)] + suffix
+                if sheet_name not in used_sheets:
+                    used_sheets.add(sheet_name)
+                    break
+                suffix_num += 1
+
+        detail_frame(days).to_excel(xw, sheet_name=sheet_name, index=False)
 st.download_button(f"Download {month_name} overtime report (.xlsx)", buf.getvalue(),
                    file_name=f"Overtime {month_name}.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
