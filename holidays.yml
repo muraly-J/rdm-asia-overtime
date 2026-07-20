@@ -1,0 +1,27 @@
+# Public holidays (Selangor / company-observed).
+# Edit once a year. Dates here use a 0 h overtime threshold (all hours = OT).
+2026:
+  - date: 2026-01-01
+    name: New Year's Day
+  - date: 2026-02-17
+    name: Chinese New Year
+  - date: 2026-03-22
+    name: Hari Raya Aidilfitri
+  - date: 2026-03-23
+    name: Hari Raya Aidilfitri
+  - date: 2026-05-01
+    name: Labour Day
+  - date: 2026-05-27
+    name: Hari Raya Haji
+  - date: 2026-06-01
+    name: Agong's Birthday
+  - date: 2026-06-17
+    name: Awal Muharram
+  - date: 2026-08-31
+    name: Merdeka Day
+  - date: 2026-09-16
+    name: Malaysia Day
+  - date: 2026-11-12
+    name: Sultan of Selangor's Birthday
+  - date: 2026-12-25
+    name: Christmas Day
