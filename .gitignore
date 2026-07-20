@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 data/*.xlsx
 .DS_Store
+.playwright-mcp/
+*.png
+~$*
