@@ -58,7 +58,7 @@ def load_attendance(path: str | Path) -> list[EmployeeSheet]:
                     emp.punches.append(v)
                 elif v is not None:
                     raise LoaderError(
-                        f"sheet {ws.title!r} row {i + 1}: unparseable timestamp {v!r}")
+                        f"sheet {ws.title!r} row {i}: unparseable timestamp {v!r}")
         employees.append(emp)
     wb.close()
     return employees

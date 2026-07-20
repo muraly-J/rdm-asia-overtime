@@ -55,6 +55,14 @@ def test_bad_header_raises_with_sheet_name(tmp_path):
         load_attendance(p)
 
 
+def test_error_names_the_actual_row(tmp_path):
+    good = row(date(2026, 6, 2), datetime(2026, 6, 2, 8, 54), datetime(2026, 6, 2, 18, 55))
+    bad = row(date(2026, 6, 3), "not-a-timestamp", None)
+    p = make_xlsx(tmp_path, [good, bad])  # good = row 3, bad = row 4
+    with pytest.raises(LoaderError, match="row 4"):
+        load_attendance(p)
+
+
 def test_real_june_file_if_present():
     path = "data/June 2026.xlsx"
     import os
