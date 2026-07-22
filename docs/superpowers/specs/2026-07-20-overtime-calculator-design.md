@@ -27,8 +27,12 @@ date**: a session starting Friday 09:00 and ending Saturday 00:21 counts entirel
 as Friday, at the 9 h weekday threshold. Day type is likewise determined by the
 login date.
 
-Overtime is reported exactly, to two decimal places. No rounding to quarter or
-half hours; payroll applies its own rounding downstream if it wants one.
+Overtime is reported to two decimal places. No rounding to quarter or half
+hours; payroll applies its own rounding downstream if it wants one. Each day's
+overtime is rounded to two decimals, and a month's bucket totals are the sums of
+those rounded daily figures, so the summary table's Total OT always equals the
+sum of its Weekday, Saturday and Sunday/PH columns — the reconciliation payroll
+needs when a figure is disputed.
 
 ## Input data
 
@@ -89,6 +93,24 @@ Sheets may contain dates outside the nominal month (an employee's June sheet inc
 3. **Pair.** Walk the timeline pairing consecutive punches into
    `(login, logout)` sessions. This is what makes the an employee case correct: `00:48`
    is consumed as Jun 4's logout, so Jun 5 opens at `09:06`.
+
+   **Carry-over cutoff.** A session may cross midnight only when its logout
+   falls **before 06:00** on the following day. If the next punch is on a later
+   day, or on the next day at 06:00 or later, the login is treated as a missing
+   punch — it becomes a dangling session (0 h, `MISSING_PUNCH`) and the next
+   punch opens a fresh session.
+
+   Without this cutoff a single forgotten scan corrupts the entire rest of the
+   month. Pairing is positional (1st–2nd, 3rd–4th, …); one missing punch shifts
+   every later punch by one, so an evening clock-out marries the *next morning's*
+   clock-in. In the real June 2026 data this produced 77 spurious weekend- and
+   overnight-spanning "sessions" (e.g. an employee Fri 5 Jun 18:45 → Mon 8 Jun 08:56 =
+   62 h) and inflated total overtime roughly threefold. The cutoff is grounded
+   in the data: every genuine past-midnight logout falls between 00:00 and 05:11,
+   nothing legitimate falls between 06:00 and 08:00, and the spurious sessions
+   all "log out" at 08:00–09:00 — arrival time, not departure. Sessions caught by
+   the cutoff are flagged for a human to supply the real missing scan at source;
+   their hours are never estimated.
 4. **Attribute.** Assign each session to `login.date()`.
 5. **Aggregate.** Day worked hours = sum of durations of sessions logging in that
    day.
@@ -174,12 +196,20 @@ real edge case observed in June 2026 becomes a named test:
 
 - an employee 10 June — four punches, cross-midnight, chained correctly
 - an employee 4–5 June — boundary punch consumed by Jun 4, does not restart Jun 5
-- an employee 4 June — zero-length session flagged
+- An evening clock-out paired against the next morning's clock-in does NOT
+  carry over: the login dangles as `MISSING_PUNCH`, 0 h (the 06:00 cutoff)
+- A logout before 06:00 the next day DOES carry over and is paid in full
 - Friday → Saturday carry-over retains the 9 h weekday threshold
 - Public holiday falling on a Saturday uses the 0 h threshold
 - Odd punch count produces `MISSING_PUNCH` and 0 hours
 - an employee 3 June — `17:55`/`17:56` double-tap collapses to one punch
 - an employee 8 June — `09:18`/`09:27` are nine minutes apart and stay separate
+- Month bucket totals sum exactly to Total OT (per-day rounding)
+
+`ZERO_LENGTH` remains as a defensive flag but cannot fire on data that has
+passed the 2-minute collapse (an in==out pair is 0 minutes apart and always
+collapses to a single punch); it is retained only against future changes to the
+collapse step.
 
 A golden test asserts the complete June 2026 twelve-employee totals so future
 refactors cannot quietly move payroll numbers. Because `data/` is gitignored, it

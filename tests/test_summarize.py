@@ -35,7 +35,9 @@ def test_saturday_threshold_5h():
                         {date(2026, 6, 6)}, JUNE, HOLIDAYS)
     d = find(s, date(2026, 6, 6))
     assert d.day_type == "saturday"
-    assert round(d.overtime_hours, 2) == round(d.worked_hours - 5.0, 2)
+    # 09:35 -> 22:39 = 13.0667 h; OT = 13.0667 - 5 = 8.0667
+    assert round(d.worked_hours, 2) == 13.07
+    assert round(d.overtime_hours, 2) == 8.07
 
 
 def test_sunday_all_hours_are_ot():
@@ -43,6 +45,8 @@ def test_sunday_all_hours_are_ot():
                         {date(2026, 6, 14)}, JUNE, HOLIDAYS)
     d = find(s, date(2026, 6, 14))
     assert d.day_type == "sunday"
+    # 09:36 -> 19:41 = 10.0833 h; 0 h threshold so all hours are OT
+    assert round(d.worked_hours, 2) == 10.08
     assert d.overtime_hours == d.worked_hours
 
 
@@ -52,6 +56,8 @@ def test_holiday_all_hours_are_ot():
                         {date(2026, 6, 17)}, JUNE, HOLIDAYS)
     d = find(s, date(2026, 6, 17))
     assert d.day_type == "holiday"
+    # 12:30 -> 20:14 = 7.7333 h; 0 h threshold so all hours are OT
+    assert round(d.worked_hours, 2) == 7.73
     assert d.overtime_hours == d.worked_hours
 
 

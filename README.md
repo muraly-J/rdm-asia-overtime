@@ -11,8 +11,11 @@ one sheet per employee) and calculates overtime.
 | Saturday | 5 h |
 | Sunday / public holiday | 0 h (all hours are OT) |
 
-Shifts crossing midnight count entirely toward the **login** date.
-Public holidays live in `holidays.yml` — edit once a year.
+Shifts crossing midnight count entirely toward the **login** date, but only when
+the clock-out lands before **06:00** the next morning. A later "logout" means a
+scan was missed — that session is flagged `MISSING_PUNCH` and pays 0 h rather
+than inventing a multi-day shift. Public holidays live in `holidays.yml` — edit
+once a year.
 
 ## Monthly routine
 
@@ -27,7 +30,7 @@ Attendance files are gitignored — they never leave this machine.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest   # 35 tests; golden test auto-skips without June 2026.xlsx
+.venv/bin/python -m pytest   # 40 tests; golden test auto-skips without June 2026.xlsx
 ```
 
 ## Regenerating the golden totals
@@ -55,13 +58,17 @@ Overtime hours are reported exact to 2 decimal places. Each employee's row shows
 
 A non-zero **Anomalies** count means the employee's total is not payable until the flagged days are checked. Flags are:
 
-- **`MISSING_PUNCH`** — someone forgot to scan out; that session counts 0 h and needs correcting at source
-- **`ZERO_LENGTH`** — scan in and out at the same minute; likely a mispress
-- **`LONG_SESSION`** — a single session over 16 h, almost always a missed punch. The hours ARE counted toward the total, so these must be checked before paying
-- **`NO_PUNCH`** — no scans that day (rest day or leave); informational, not an error
+- **`MISSING_PUNCH`** — an odd number of scans (someone forgot to scan out, or a mid-day scan is missing). That session counts 0 h; the real time must be supplied at source before it can be paid. This is the common flag — missing scans are frequent in the raw data
+- **`LONG_SESSION`** — a single **same-day** session over 16 h. The hours ARE counted toward the total, so check these before paying
+- **`ZERO_LENGTH`** — scan in and out at the same minute (defensive; does not occur once near-duplicate scans are merged)
+- **`NO_PUNCH`** — no scans that day (rest day or leave); informational, not an error, and not counted in the anomaly total
 - **`OUT_OF_MONTH`** — a row dated outside the selected month; listed but excluded from totals
 
-In the June 2026 data, an employee has sessions of 68.8 h, 44.6 h, and 34.2 h from missed punches — his total is inflated until those are corrected at source.
+In the June 2026 data only an employee, an employee and an employee are free of anomalies. The
+other nine each have `MISSING_PUNCH` days whose hours cannot be paid until the
+missing scans are corrected at source — so their `ot_total` is a lower bound, not
+a final figure. Two same-day `LONG_SESSION` days (an employee 6 Jun 16.97 h, an employee
+20 Jun 20.58 h) are counted and need a manual check.
 
 ## Configuration
 
