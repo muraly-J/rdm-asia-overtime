@@ -34,17 +34,32 @@ def collapse_punches(punches: list[datetime], tolerance_minutes: int = 2) -> lis
     return kept
 
 
-def pair_sessions(punches: list[datetime]) -> list[Session]:
+def pair_sessions(punches: list[datetime], carryover_before_hour: int = 6) -> list[Session]:
     """Pair a chronological punch timeline into (login, logout) sessions.
 
-    Punches must already be collapsed and sorted. An odd count leaves the
-    final punch as a dangling session with no logout.
+    Punches must already be collapsed and sorted. Punches are paired
+    login/logout in order, but a pairing across midnight is only allowed
+    when the logout falls before `carryover_before_hour` on the next day
+    (a genuine overnight shift). Otherwise the next punch belongs to a new
+    day's session and the current punch dangles with no logout - this
+    prevents an evening clock-out from spuriously pairing with the
+    following morning's (or a later day's) clock-in after a missed punch.
+    An unpaired final punch leaves a dangling session with no logout.
     """
     sessions: list[Session] = []
-    for i in range(0, len(punches) - 1, 2):
-        sessions.append(Session(punches[i], punches[i + 1]))
-    if len(punches) % 2 == 1:
-        sessions.append(Session(punches[-1], None))
+    i = 0
+    while i < len(punches):
+        a = punches[i]
+        if i + 1 < len(punches):
+            b = punches[i + 1]
+            same_day = b.date() == a.date()
+            carry = b.date() == a.date() + timedelta(days=1) and b.hour < carryover_before_hour
+            if same_day or carry:
+                sessions.append(Session(a, b))
+                i += 2
+                continue
+        sessions.append(Session(a, None))
+        i += 1
     return sessions
 
 
@@ -102,10 +117,12 @@ def month_totals(summaries: list[DaySummary]) -> dict:
         if not s.in_month:
             continue
         t["worked"] += s.worked_hours
-        t[bucket[s.day_type]] += s.overtime_hours
-        t["ot_total"] += s.overtime_hours
+        ot = round(s.overtime_hours, 2)
+        t[bucket[s.day_type]] += ot
         if any(f != "NO_PUNCH" for f in s.flags):
             t["anomalies"] += 1
-    for k in ("worked", "ot_weekday", "ot_saturday", "ot_sunday_ph", "ot_total"):
+    t["worked"] = round(t["worked"], 2)
+    for k in ("ot_weekday", "ot_saturday", "ot_sunday_ph"):
         t[k] = round(t[k], 2)
+    t["ot_total"] = round(t["ot_weekday"] + t["ot_saturday"] + t["ot_sunday_ph"], 2)
     return t

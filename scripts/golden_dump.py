@@ -1,6 +1,6 @@
 """Print June 2026 totals per employee, formatted as a Python dict literal.
 
-Usage: .venv/bin/python scripts/golden_dump.py
+Usage: PYTHONPATH=. .venv/bin/python scripts/golden_dump.py
 Paste the output into tests/test_golden_june_2026.py EXPECTED.
 """
 from overtime.calc import month_totals, summarize_month

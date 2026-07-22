@@ -95,3 +95,23 @@ def test_month_totals_buckets():
     assert t["ot_sunday_ph"] == 7.0
     assert t["ot_total"] == 10.73
     assert t["anomalies"] == 0
+
+
+def test_evening_out_next_morning_flagged_not_paid():
+    # login on a day whose out-punch is missing; next scan is next morning
+    punches = [dt("2026-06-08 08:43"), dt("2026-06-08 18:45"), dt("2026-06-09 08:56")]
+    s = summarize_month("X", punches, {date(2026, 6, 8), date(2026, 6, 9)}, JUNE, HOLIDAYS)
+    d9 = find(s, date(2026, 6, 9))
+    assert "MISSING_PUNCH" in d9.flags
+    assert d9.worked_hours == 0.0
+
+
+def test_totals_reconcile():
+    # per-day rounding: buckets must sum exactly to ot_total
+    punches = [dt("2026-06-02 09:04"), dt("2026-06-02 19:48"),  # 1.7333 -> 1.73
+               dt("2026-06-03 09:04"), dt("2026-06-03 19:48"),
+               dt("2026-06-04 09:04"), dt("2026-06-04 19:48")]
+    days = {date(2026, 6, 2), date(2026, 6, 3), date(2026, 6, 4)}
+    t = month_totals(summarize_month("X", punches, days, JUNE, HOLIDAYS))
+    assert t["ot_total"] == round(t["ot_weekday"] + t["ot_saturday"] + t["ot_sunday_ph"], 2)
+    assert t["ot_total"] == 5.19
