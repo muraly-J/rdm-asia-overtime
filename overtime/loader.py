@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import IO
 
 import openpyxl
 
@@ -30,8 +31,9 @@ class EmployeeSheet:
     dates_present: set[date] = field(default_factory=set)
 
 
-def load_attendance(path: str | Path) -> list[EmployeeSheet]:
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+def load_attendance(source: str | Path | IO[bytes]) -> list[EmployeeSheet]:
+    """Read a workbook from a path or an in-memory file object (e.g. an upload)."""
+    wb = openpyxl.load_workbook(source, data_only=True, read_only=True)
     employees: list[EmployeeSheet] = []
     for ws in wb.worksheets:
         rows = ws.iter_rows(values_only=True)

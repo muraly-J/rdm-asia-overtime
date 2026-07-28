@@ -5,55 +5,82 @@ All calculation lives in the overtime/ package; this file is widgets only.
 from __future__ import annotations
 
 import io
-import re
-from datetime import datetime
-from pathlib import Path
+from collections import Counter
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
 
 from overtime.calc import DaySummary, month_totals, summarize_month
-from overtime.loader import load_attendance
+from overtime.loader import EmployeeSheet, load_attendance
 from overtime.rules import load_holidays
 
-DATA_DIR = Path("data")
 HOLIDAYS_FILE = "holidays.yml"
 
 st.set_page_config(page_title="RDM Asia Overtime", layout="wide")
 st.title("RDM Asia — Monthly Overtime")
 
+uploads = st.file_uploader(
+    "Attendance export (.xlsx) — one sheet per employee",
+    type="xlsx", accept_multiple_files=True,
+    help="Upload the monthly biometric export. Several files are merged by employee.")
 
-def discover_months() -> dict[str, Path]:
-    """Map 'June 2026' -> path, newest first, for files named '<Month Year>.xlsx'."""
-    found = {}
-    for p in sorted(DATA_DIR.glob("*.xlsx")):
-        m = re.fullmatch(r"([A-Za-z]+) (\d{4})", p.stem)
-        if not m:
-            continue
-        try:
-            key = datetime.strptime(p.stem, "%B %Y")
-        except ValueError:
-            continue
-        found[p.stem] = (key, p)
-    ordered = sorted(found.items(), key=lambda kv: kv[1][0], reverse=True)
-    return {name: path for name, (_, path) in ordered}
-
-
-months = discover_months()
-if not months:
-    st.error(f"No attendance files found. Drop '<Month Year>.xlsx' into {DATA_DIR}/.")
+if not uploads:
+    st.info("Upload an attendance export to calculate overtime.")
     st.stop()
 
-month_name = st.sidebar.selectbox("Month", list(months))
-month_dt = datetime.strptime(month_name, "%B %Y")
-month = (month_dt.year, month_dt.month)
+
+@st.cache_data(show_spinner="Reading attendance…")
+def read_uploads(files: list[tuple[str, bytes]]) -> list[EmployeeSheet]:
+    """Parse each uploaded workbook, merging employees that appear in more than one."""
+    merged: dict[str, EmployeeSheet] = {}
+    for name, blob in files:
+        try:
+            sheets = load_attendance(io.BytesIO(blob))
+        except Exception as e:
+            raise RuntimeError(f"{name}: {type(e).__name__}: {e}") from e
+        for emp in sheets:
+            existing = merged.get(emp.short_name)
+            if existing is None:
+                merged[emp.short_name] = emp
+                continue
+            existing.punches.extend(emp.punches)
+            existing.dates_present |= emp.dates_present
+            existing.full_name = existing.full_name or emp.full_name
+    return list(merged.values())
+
 
 try:
     holidays = load_holidays(HOLIDAYS_FILE)
-    sheets = load_attendance(months[month_name])
+    sheets = read_uploads([(f.name, f.getvalue()) for f in uploads])
 except Exception as e:
     st.error(f"Failed to load data: {type(e).__name__}: {e}")
     st.stop()
+
+if not sheets:
+    st.error("No employee sheets found in the upload.")
+    st.stop()
+
+# Month comes from the data, not the filename: the month most rows fall in wins.
+seen: Counter[tuple[int, int]] = Counter()
+for emp in sheets:
+    seen.update((d.year, d.month) for d in emp.dates_present)
+if not seen:
+    st.error("No dated rows found in the upload.")
+    st.stop()
+
+options = sorted(seen, reverse=True)
+default = max(seen, key=lambda m: (seen[m], m))
+month = st.sidebar.selectbox(
+    "Month", options, index=options.index(default),
+    format_func=lambda m: f"{date(m[0], m[1], 1):%B %Y}")
+month_name = f"{date(month[0], month[1], 1):%B %Y}"
+
+if month[0] not in {d.year for d in holidays}:
+    st.warning(
+        f"{HOLIDAYS_FILE} has no entries for {month[0]} — public holidays that month "
+        "will be treated as ordinary days and their overtime under-counted. "
+        "Add the year to the file before paying these numbers.")
 
 month_hols = {d: n for d, n in holidays.items() if (d.year, d.month) == month}
 if month_hols:

@@ -19,11 +19,15 @@ once a year.
 
 ## Monthly routine
 
-1. Drop the export into `data/` named `<Month Year>.xlsx` (e.g. `July 2026.xlsx`).
-2. `.venv/bin/python -m streamlit run app.py`
-3. Pick the month, check any flagged anomalies in the drilldown, download the report.
+1. `.venv/bin/python -m streamlit run app.py`
+2. Upload the biometric export (`.xlsx`) in the browser. Several files can be
+   uploaded at once — employees appearing in more than one are merged.
+3. The month is read from the data (the month most rows fall in); override it in
+   the sidebar if needed.
+4. Check any flagged anomalies in the drilldown, download the report.
 
-Attendance files are gitignored — they never leave this machine.
+Uploads are held in memory for the session only — nothing is written to disk.
+Files kept in `data/` are gitignored and used only by the golden test.
 
 ## Setup
 
