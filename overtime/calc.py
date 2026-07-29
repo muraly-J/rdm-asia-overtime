@@ -1,4 +1,4 @@
-"""Punch timeline -> sessions -> per-day summaries."""
+"""Recorded in/out windows -> merged sessions -> per-day summaries."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,11 +6,13 @@ from datetime import date, datetime, timedelta
 
 from .rules import THRESHOLDS, day_type
 
+CARRYOVER_BEFORE_HOUR = 6
+
 
 @dataclass(frozen=True)
 class Session:
     login: datetime
-    logout: datetime | None  # None = dangling (missing logout punch)
+    logout: datetime | None  # None = dangling (the paired scan is missing)
 
     @property
     def hours(self) -> float:
@@ -19,48 +21,34 @@ class Session:
         return (self.logout - self.login).total_seconds() / 3600.0
 
 
-def collapse_punches(punches: list[datetime], tolerance_minutes: int = 2) -> list[datetime]:
-    """Sort punches and collapse scanner double-taps.
+def merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[Session]:
+    """Union overlapping or touching windows into non-overlapping sessions.
 
-    A punch within `tolerance_minutes` of the previously *kept* punch is the
-    same physical punch recorded twice; keep the earliest.
+    The export records most days twice — once as 'work', once as 'site' — with
+    the two windows overlapping. Summing them would pay the overlap twice, so
+    they are unioned; windows that genuinely do not meet stay separate and add
+    up as they should.
     """
-    tol = timedelta(minutes=tolerance_minutes)
-    kept: list[datetime] = []
-    for p in sorted(punches):
-        if kept and p - kept[-1] <= tol:
-            continue
-        kept.append(p)
-    return kept
+    merged: list[list[datetime]] = []
+    for start, end in sorted(intervals):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [Session(a, b) for a, b in merged]
 
 
-def pair_sessions(punches: list[datetime], carryover_before_hour: int = 6) -> list[Session]:
-    """Pair a chronological punch timeline into (login, logout) sessions.
+def _within_carryover(start: datetime, end: datetime) -> bool:
+    """True if `end` is a plausible clock-out for a shift starting at `start`.
 
-    Punches must already be collapsed and sorted. Punches are paired
-    login/logout in order, but a pairing across midnight is only allowed
-    when the logout falls before `carryover_before_hour` on the next day
-    (a genuine overnight shift). Otherwise the next punch belongs to a new
-    day's session and the current punch dangles with no logout - this
-    prevents an evening clock-out from spuriously pairing with the
-    following morning's (or a later day's) clock-in after a missed punch.
-    An unpaired final punch leaves a dangling session with no logout.
+    A shift may run past midnight, but only until CARRYOVER_BEFORE_HOUR the
+    next morning. A later clock-out means a scan was missed, so the window is
+    not treated as worked time.
     """
-    sessions: list[Session] = []
-    i = 0
-    while i < len(punches):
-        a = punches[i]
-        if i + 1 < len(punches):
-            b = punches[i + 1]
-            same_day = b.date() == a.date()
-            carry = b.date() == a.date() + timedelta(days=1) and b.hour < carryover_before_hour
-            if same_day or carry:
-                sessions.append(Session(a, b))
-                i += 2
-                continue
-        sessions.append(Session(a, None))
-        i += 1
-    return sessions
+    if end.date() == start.date():
+        return True
+    return (end.date() == start.date() + timedelta(days=1)
+            and end.hour < CARRYOVER_BEFORE_HOUR)
 
 
 @dataclass
@@ -74,37 +62,57 @@ class DaySummary:
     overtime_hours: float
     flags: list[str] = field(default_factory=list)
     in_month: bool = True
+    note: str = ""
 
 
-def summarize_month(
+def summarize_days(
     employee: str,
-    punches: list[datetime],
+    intervals_by_day: dict[date, list[tuple[datetime, datetime]]],
+    dangling_by_day: dict[date, list[datetime]],
     dates_present: set[date],
     month: tuple[int, int],
     holidays: dict[date, str],
+    notes: dict[date, str] | None = None,
 ) -> list[DaySummary]:
-    """Full pipeline for one employee: collapse -> pair -> attribute -> classify."""
+    """Full pipeline for one employee: merge -> attribute -> classify."""
     from .anomalies import day_flags  # local import: anomalies imports Session from us
 
-    sessions = pair_sessions(collapse_punches(punches))
-    by_day: dict[date, list[Session]] = {}
-    for s in sessions:
-        by_day.setdefault(s.login.date(), []).append(s)
+    notes = notes or {}
+    all_days = sorted(dates_present | set(intervals_by_day) | set(dangling_by_day))
 
     summaries: list[DaySummary] = []
-    for d in sorted(dates_present | set(by_day)):
-        day_sessions = by_day.get(d, [])
+    for d in all_days:
+        paired, unpaired = [], list(dangling_by_day.get(d, []))
+        for start, end in intervals_by_day.get(d, []):
+            if _within_carryover(start, end):
+                paired.append((start, end))
+            else:
+                unpaired.append(start)  # missed scan, not a multi-day shift
+
+        sessions = merge_intervals(paired)
+        sessions.extend(Session(t, None) for t in sorted(unpaired))
+
         dtype = day_type(d, holidays)
-        worked = sum(s.hours for s in day_sessions)
+        worked = sum(s.hours for s in sessions)
         threshold = THRESHOLDS[dtype]
-        ot = max(0.0, worked - threshold)
-        flags = day_flags(day_sessions, had_row=d in dates_present)
+        flags = day_flags(sessions, had_row=d in dates_present)
         in_month = (d.year, d.month) == month
         if not in_month:
             flags.append("OUT_OF_MONTH")
-        summaries.append(DaySummary(employee, d, dtype, day_sessions,
-                                    worked, threshold, ot, flags, in_month))
+        summaries.append(DaySummary(employee, d, dtype, sessions, worked, threshold,
+                                    max(0.0, worked - threshold), flags, in_month,
+                                    notes.get(d, "")))
     return summaries
+
+
+def summarize_employee(
+    emp,
+    month: tuple[int, int],
+    holidays: dict[date, str],
+) -> list[DaySummary]:
+    """Convenience wrapper over an EmployeeAttendance record from the loader."""
+    return summarize_days(emp.name, emp.intervals, emp.dangling, emp.dates_present,
+                          month, holidays, emp.notes)
 
 
 def month_totals(summaries: list[DaySummary]) -> dict:

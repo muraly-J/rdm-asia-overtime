@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 data/*.xlsx
+data/*.csv
 .DS_Store
 .playwright-mcp/
 *.png

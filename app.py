@@ -5,14 +5,15 @@ All calculation lives in the overtime/ package; this file is widgets only.
 from __future__ import annotations
 
 import io
+import re
 from collections import Counter
-from datetime import date, datetime
+from datetime import date
 
 import pandas as pd
 import streamlit as st
 
-from overtime.calc import DaySummary, month_totals, summarize_month
-from overtime.loader import EmployeeSheet, load_attendance
+from overtime.calc import DaySummary, month_totals, summarize_employee
+from overtime.loader import EmployeeAttendance, load_attendance
 from overtime.rules import load_holidays
 
 HOLIDAYS_FILE = "holidays.yml"
@@ -21,9 +22,9 @@ st.set_page_config(page_title="RDM Asia Overtime", layout="wide")
 st.title("RDM Asia — Monthly Overtime")
 
 uploads = st.file_uploader(
-    "Attendance export (.xlsx) — one sheet per employee",
-    type="xlsx", accept_multiple_files=True,
-    help="Upload the monthly biometric export. Several files are merged by employee.")
+    "Attendance export (.csv) — all staff in one file",
+    type="csv", accept_multiple_files=True,
+    help="Upload the monthly attendance export. Several months can be uploaded at once.")
 
 if not uploads:
     st.info("Upload an attendance export to calculate overtime.")
@@ -31,39 +32,43 @@ if not uploads:
 
 
 @st.cache_data(show_spinner="Reading attendance…")
-def read_uploads(files: list[tuple[str, bytes]]) -> list[EmployeeSheet]:
-    """Parse each uploaded workbook, merging employees that appear in more than one."""
-    merged: dict[str, EmployeeSheet] = {}
+def read_uploads(files: list[tuple[str, bytes]]) -> list[EmployeeAttendance]:
+    """Parse each uploaded CSV, merging employees that appear in more than one."""
+    merged: dict[str, EmployeeAttendance] = {}
     for name, blob in files:
         try:
-            sheets = load_attendance(io.BytesIO(blob))
+            records = load_attendance(io.BytesIO(blob))
         except Exception as e:
             raise RuntimeError(f"{name}: {type(e).__name__}: {e}") from e
-        for emp in sheets:
-            existing = merged.get(emp.short_name)
+        for emp in records:
+            existing = merged.get(emp.name)
             if existing is None:
-                merged[emp.short_name] = emp
+                merged[emp.name] = emp
                 continue
-            existing.punches.extend(emp.punches)
+            for d, ivs in emp.intervals.items():
+                existing.intervals.setdefault(d, []).extend(ivs)
+            for d, stamps in emp.dangling.items():
+                existing.dangling.setdefault(d, []).extend(stamps)
             existing.dates_present |= emp.dates_present
-            existing.full_name = existing.full_name or emp.full_name
-    return list(merged.values())
+            existing.notes.update(emp.notes)
+            existing.badge = existing.badge or emp.badge
+    return sorted(merged.values(), key=lambda e: e.name)
 
 
 try:
     holidays = load_holidays(HOLIDAYS_FILE)
-    sheets = read_uploads([(f.name, f.getvalue()) for f in uploads])
+    staff = read_uploads([(f.name, f.getvalue()) for f in uploads])
 except Exception as e:
     st.error(f"Failed to load data: {type(e).__name__}: {e}")
     st.stop()
 
-if not sheets:
-    st.error("No employee sheets found in the upload.")
+if not staff:
+    st.error("No employee rows found in the upload.")
     st.stop()
 
 # Month comes from the data, not the filename: the month most rows fall in wins.
 seen: Counter[tuple[int, int]] = Counter()
-for emp in sheets:
+for emp in staff:
     seen.update((d.year, d.month) for d in emp.dates_present)
 if not seen:
     st.error("No dated rows found in the upload.")
@@ -90,11 +95,11 @@ if month_hols:
 
 all_days: dict[str, list[DaySummary]] = {}
 rows = []
-for emp in sheets:
-    days = summarize_month(emp.short_name, emp.punches, emp.dates_present, month, holidays)
-    all_days[emp.short_name] = days
+for emp in staff:
+    days = summarize_employee(emp, month, holidays)
+    all_days[emp.name] = days
     t = month_totals(days)
-    rows.append({"Employee": emp.short_name, "Full name": emp.full_name,
+    rows.append({"Employee": emp.name, "Badge": emp.badge,
                  "Worked (h)": t["worked"], "Weekday OT": t["ot_weekday"],
                  "Saturday OT": t["ot_saturday"], "Sun/PH OT": t["ot_sunday_ph"],
                  "Total OT": t["ot_total"], "Anomalies": t["anomalies"]})
@@ -107,9 +112,11 @@ if summary_df["Anomalies"].sum():
     st.warning("Some days carry anomaly flags — check the drilldown before paying these numbers.")
 
 
-def detail_frame(days: list[DaySummary]) -> pd.DataFrame:
+def detail_frame(days: list[DaySummary], selected_month_only: bool = True) -> pd.DataFrame:
     recs = []
     for d in days:
+        if selected_month_only and not d.in_month:
+            continue
         sessions = "; ".join(
             f"{s.login:%H:%M}–{s.logout:%d %H:%M}" if s.logout and s.logout.date() != s.login.date()
             else f"{s.login:%H:%M}–{s.logout:%H:%M}" if s.logout
@@ -118,13 +125,30 @@ def detail_frame(days: list[DaySummary]) -> pd.DataFrame:
         recs.append({"Date": f"{d.date:%a %d %b}", "Type": d.day_type,
                      "Sessions": sessions, "Worked (h)": round(d.worked_hours, 2),
                      "Threshold": d.threshold, "OT (h)": round(d.overtime_hours, 2),
-                     "Flags": ", ".join(d.flags)})
+                     "Flags": ", ".join(d.flags), "Export note": d.note})
     return pd.DataFrame(recs)
+
+
+def sheet_title(name: str, used: set[str]) -> str:
+    """Excel sheet name: <=31 chars, no reserved characters, unique."""
+    clean = re.sub(r"[\[\]:*?/\\]", " ", name).strip("' ") or "Employee"
+    title = clean[:31].strip("' ")
+    n = 2
+    while title in used:
+        suffix = f"~{n}"
+        title = clean[:31 - len(suffix)].strip("' ") + suffix
+        n += 1
+    used.add(title)
+    return title
 
 
 st.subheader("Employee drilldown")
 who = st.selectbox("Employee", list(all_days))
-st.dataframe(detail_frame(all_days[who]), use_container_width=True, hide_index=True)
+# An upload spanning several months would otherwise bury the selected month
+# under every other month's rows, all flagged OUT_OF_MONTH.
+show_all = st.checkbox("Show days outside the selected month", value=False)
+st.dataframe(detail_frame(all_days[who], selected_month_only=not show_all),
+             use_container_width=True, hide_index=True)
 
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as xw:
@@ -132,22 +156,7 @@ with pd.ExcelWriter(buf, engine="openpyxl") as xw:
 
     used_sheets = {"Summary"}
     for name, days in all_days.items():
-        # Generate collision-safe sheet name (max 31 chars)
-        sheet_name = name[:31]
-        if sheet_name not in used_sheets:
-            used_sheets.add(sheet_name)
-        else:
-            # Collision: append numeric suffix, re-truncate to stay <= 31 chars
-            suffix_num = 2
-            while True:
-                suffix = f"~{suffix_num}"
-                sheet_name = name[:31 - len(suffix)] + suffix
-                if sheet_name not in used_sheets:
-                    used_sheets.add(sheet_name)
-                    break
-                suffix_num += 1
-
-        detail_frame(days).to_excel(xw, sheet_name=sheet_name, index=False)
+        detail_frame(days).to_excel(xw, sheet_name=sheet_title(name, used_sheets), index=False)
 st.download_button(f"Download {month_name} overtime report (.xlsx)", buf.getvalue(),
                    file_name=f"Overtime {month_name}.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

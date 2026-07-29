@@ -1,13 +1,20 @@
 # Overtime Calculator — Design
 
 Date: 2026-07-20
+Revised: 2026-07-29 — CSV input; day modelled as a union of recorded windows
 Status: Approved
 
 ## Problem
 
-RDM Asia receives one Excel attendance export per month, containing one sheet per
-employee (12 for June 2026). Overtime is currently calculated by hand. It must be
-automated, repeatable every month, and auditable when payroll disputes a number.
+RDM Asia receives one attendance export per month covering all staff (12 people).
+Overtime was calculated by hand. It must be automated, repeatable every month, and
+auditable when payroll disputes a number.
+
+The original design read a per-employee-sheet xlsx and reconstructed a punch
+timeline from it. That was wrong: the export already pairs each clock-in with its
+clock-out, and re-deriving the pairing corrupted days where the same span is
+reported twice. The 2026-07-29 revision reads the pairs as given. Sections below
+describe the current design; the superseded punch-list reasoning is not retained.
 
 ## Overtime rules
 
@@ -36,86 +43,75 @@ needs when a figure is disputed.
 
 ## Input data
 
-Source file: `data/<Month Year>.xlsx`, e.g. `data/June 2026.xlsx`.
+One CSV per month covering all staff, uploaded in the app. The Jan–June 2026
+back-fill arrived as a single six-month file; both work, because the reporting
+month is derived from the data rather than the filename.
 
-One worksheet per employee, sheet name being the employee's short name. Row 1 is
-the header, row 2 a separator, data from row 3. Relevant columns:
+Columns: `Branch, Department, Sect., Work Pattern, Badge No., Name, Location,
+P.Pos, Day, Date, Time In, In (Map), Time Out, Out (Map), Hours, Group, Leave,
+Remark`. The file carries a UTF-8 BOM. `Date` is day-first (`d/m/Y`); `Time In`
+and `Time Out` are full `d/m/Y H:M` timestamps.
 
-| Column | Field       |
-| ------ | ----------- |
-| E      | Badge No.   |
-| F      | Name        |
-| I      | Day         |
-| J      | Date        |
-| K      | Time In     |
-| M      | Time Out    |
-| O      | Hours       |
+The `Hours` column is **ignored** — hours are recomputed from the timestamps. It
+is not merely redundant but wrong: it reports `25:30:00` on one row and `0:00`
+on rows where a scan is missing.
 
-The `Hours` column is **ignored** — hours are recomputed from the timestamps.
+Employees are keyed on **`Name`**, not `Badge No.` — two staff have no badge
+number anywhere in the export.
 
 ### Known characteristics of the export
 
-The biometric scanner emits multiple rows per day. These are not independent
-sessions; they are alternative pairings of the same underlying punch list. an employee,
-10 June 2026 illustrates this:
+**Each row is an already-paired window.** `Time In` and `Time Out` both appear on
+the same row; there is no pairing to reconstruct.
 
-    row 1:  04:30 -> 16:58
-    row 2:  11:41 -> 01:38 (+1 day)
+**Most days are reported twice.** One row has `Group=work`, another `Group=site`,
+and the two windows overlap — they are two views of the same day, not two stints.
+an employee, 5 January 2026:
 
-The underlying punches are `04:30, 11:41, 16:58, 01:38(+1d)`.
+    work:  08:56 -> 23:44
+    site:  10:28 -> 23:44
 
-A carry-over logout can also reappear as a Time In on the following day's row.
-an employee, 4–5 June 2026:
+Across the six-month file the site window lies strictly inside the work window on
+1191 of 1326 such days. Summing the rows would pay the overlap twice; the union
+is the day's actual span. Where the windows genuinely do not meet — an early site
+visit before the office scan — the union keeps them separate and they add up.
 
-    Jun 4 row:  09:03 -> 00:48 (+1d)
-    Jun 5 row:  00:48 -> 09:06,  09:06 -> 00:52 (+1d)
+**A lone scan is written as `Time In == Time Out`** (remark `No In/Out`, 248 rows).
+The employee scanned once and the partner scan is missing.
 
-The `00:48` belongs to Jun 4's session and must not open a second Jun 5 session.
+**Cross-midnight windows are already attributed to the login date** by the export,
+and all 186 of them end before 06:00.
 
-Sheets may contain dates outside the nominal month (an employee's June sheet includes
-2026-07-01).
+**Days with no times at all** carry `Rest day`, `Absent`, `Leave` or `Half Day`
+in the `Remark`/`Leave` columns.
+
+**Rows may fall outside the nominal month** when a monthly file has ragged edges.
 
 ## Algorithm
 
-1. **Load.** For each sheet, read every non-empty `Time In` and `Time Out`
-   timestamp into a flat list of punch instants for that employee.
-2. **Normalise.** Sort ascending, then collapse punches within **2 minutes** of
-   each other into one, keeping the earliest. The result is one chronological
-   punch timeline per employee for the whole month.
+1. **Load.** Read each row as a `(Time In, Time Out)` window, skipping the `──`
+   employee banner rows and blank padding rows. Rows where in == out become
+   *lone scans*; rows with no times only register that the date was reported.
 
-   The 2-minute window is required, not cosmetic. The scanner routinely records
-   the same physical punch twice a minute apart (`17:55` and `17:56`); collapsing
-   only exactly-equal timestamps leaves six of the twelve June 2026 employees
-   with an odd punch count and a month of spurious `MISSING_PUNCH` flags. Two
-   minutes absorbs the double-taps while never swallowing a genuine step-out —
-   a wider gap such as an employee's `09:18`/`09:27` stays two distinct punches and, if
-   it leaves the count odd, is flagged for human review rather than guessed at.
-3. **Pair.** Walk the timeline pairing consecutive punches into
-   `(login, logout)` sessions. This is what makes the an employee case correct: `00:48`
-   is consumed as Jun 4's logout, so Jun 5 opens at `09:06`.
+   The `Day` column is checked against the parsed date on every row. A mismatch
+   raises rather than silently reinterpreting — this is what catches the export
+   flipping from `d/m/Y` to `m/d/Y`, which would otherwise move hours between
+   months undetected.
+2. **Merge.** For each employee-day, union the windows: sort by start, then
+   coalesce any that overlap or touch. This is what stops the `work`/`site`
+   duplicate rows being counted twice. There is no gap tolerance — windows merge
+   only where they actually meet.
 
-   **Carry-over cutoff.** A session may cross midnight only when its logout
-   falls **before 06:00** on the following day. If the next punch is on a later
-   day, or on the next day at 06:00 or later, the login is treated as a missing
-   punch — it becomes a dangling session (0 h, `MISSING_PUNCH`) and the next
-   punch opens a fresh session.
-
-   Without this cutoff a single forgotten scan corrupts the entire rest of the
-   month. Pairing is positional (1st–2nd, 3rd–4th, …); one missing punch shifts
-   every later punch by one, so an evening clock-out marries the *next morning's*
-   clock-in. In the real June 2026 data this produced 77 spurious weekend- and
-   overnight-spanning "sessions" (e.g. an employee Fri 5 Jun 18:45 → Mon 8 Jun 08:56 =
-   62 h) and inflated total overtime roughly threefold. The cutoff is grounded
-   in the data: every genuine past-midnight logout falls between 00:00 and 05:11,
-   nothing legitimate falls between 06:00 and 08:00, and the spurious sessions
-   all "log out" at 08:00–09:00 — arrival time, not departure. Sessions caught by
-   the cutoff are flagged for a human to supply the real missing scan at source;
-   their hours are never estimated.
-4. **Attribute.** Assign each session to `login.date()`.
-5. **Aggregate.** Day worked hours = sum of durations of sessions logging in that
-   day.
-6. **Classify.** Determine day type from the login date and `holidays.yml`.
-7. **Compute.** `overtime = max(0, worked_hours - threshold(day_type))`.
+   **Carry-over cutoff.** A window may cross midnight only when it ends **before
+   06:00** the next day. A later end means a scan was missed, so the window does
+   not become worked time; its start is recorded as a lone scan instead
+   (0 h, `MISSING_PUNCH`). No data in the six-month file trips this, but a
+   forgotten scan would otherwise pay a multi-day shift, so the guard stays.
+3. **Attribute.** Assign each merged session to `login.date()`.
+4. **Aggregate.** Day worked hours = sum of the merged sessions' durations. Lone
+   scans contribute 0 h and raise a flag.
+5. **Classify.** Determine day type from the login date and `holidays.yml`.
+6. **Compute.** `overtime = max(0, worked_hours - threshold(day_type))`.
 
 Days outside the selected month are excluded from totals but listed in the
 drilldown with an `OUT_OF_MONTH` flag.
@@ -139,30 +135,32 @@ than the convenience.
 Bad data is surfaced, never silently paid and never silently dropped. Flags are
 computed per employee-day, shown in the drilldown and counted in the summary:
 
-| Flag            | Condition                        | Effect on hours          |
-| --------------- | -------------------------------- | ------------------------ |
-| `MISSING_PUNCH` | odd punch count; dangling session | dangling session = 0 h   |
-| `ZERO_LENGTH`   | login == logout                  | 0 h                      |
-| `LONG_SESSION`  | single session > 16 h            | counted, flagged loudly  |
-| `NO_PUNCH`      | day present with no timestamps   | 0 h, informational only  |
-| `OUT_OF_MONTH`  | date outside selected month      | excluded from totals     |
+| Flag            | Condition                             | Effect on hours          |
+| --------------- | ------------------------------------- | ------------------------ |
+| `MISSING_PUNCH` | lone scan (`No In/Out`, or a window past the 06:00 cutoff) | 0 h for that scan |
+| `ZERO_LENGTH`   | login == logout                       | 0 h                      |
+| `LONG_SESSION`  | single merged session > 16 h          | counted, flagged loudly  |
+| `NO_PUNCH`      | day reported with no timestamps       | 0 h, informational only  |
+| `OUT_OF_MONTH`  | date outside selected month           | excluded from totals     |
 
-A dangling session is never estimated or extrapolated. It reads 0 hours and
-requires a human to correct the source data.
+A lone scan is never estimated or extrapolated. It reads 0 hours and requires a
+human to correct the source data. A day can hold both a lone scan and a genuine
+window — the window is paid, and the day is still flagged.
 
-Loader failures — missing expected column, unparseable sheet — raise a Streamlit
-error naming the sheet and row. The app never renders a partial total.
+Loader failures — missing column, unparseable timestamp, a `Day` column that
+disagrees with the date, a half-open or reversed row — raise a Streamlit error
+naming the CSV row. The app never renders a partial total.
 
 ## Architecture
 
 ```
 overtime/
-  loader.py      xlsx -> dict[employee, list[datetime]]
+  loader.py      CSV -> list[EmployeeAttendance] (windows, lone scans, notes)
   rules.py       day_type(date), threshold_hours(day_type), holiday loading
-  calc.py        punches -> list[DaySummary]
-  anomalies.py   DaySummary -> list[Flag]
+  calc.py        windows -> merged sessions -> list[DaySummary]
+  anomalies.py   sessions -> list[Flag]
 app.py           Streamlit UI only
-data/            monthly xlsx files (gitignored)
+data/            attendance exports (gitignored; only the golden test reads them)
 holidays.yml
 tests/
 ```
@@ -172,13 +170,19 @@ imports, no file dialogs, no global state. `app.py` contains only widgets and
 table rendering. This is what makes the rules unit-testable without running a
 browser, which matters because the output is payroll money.
 
-`DaySummary` carries: employee, date, day type, day name, sessions (list of
-login/logout pairs), worked hours, threshold, overtime hours, flags.
+`DaySummary` carries: employee, date, day type, merged sessions, worked hours,
+threshold, overtime hours, flags, and the export's own `Leave`/`Remark` note for
+the day.
 
 ## User interface
 
-Sidebar: month dropdown, populated by scanning `data/` for `*.xlsx` and parsing
-`<Month Year>` from the filename.
+Upload area: one or more attendance CSVs, held in memory for the session only —
+nothing is written to disk. Employees appearing in several files are merged by
+name.
+
+Sidebar: month dropdown, derived from the uploaded rows (the month most rows fall
+in is preselected), plus the month's public holidays and a warning when
+`holidays.yml` has no entries for that year.
 
 Main area:
 
@@ -191,30 +195,33 @@ Main area:
 
 ## Testing
 
-`pytest` over `calc.py` and `rules.py`, using hand-written punch fixtures. Each
-real edge case observed in June 2026 becomes a named test:
+`pytest` over `loader.py`, `calc.py`, `anomalies.py` and `rules.py`, using
+hand-written CSV and interval fixtures. Each real characteristic of the export
+becomes a named test:
 
-- an employee 10 June — four punches, cross-midnight, chained correctly
-- an employee 4–5 June — boundary punch consumed by Jun 4, does not restart Jun 5
-- An evening clock-out paired against the next morning's clock-in does NOT
-  carry over: the login dangles as `MISSING_PUNCH`, 0 h (the 06:00 cutoff)
-- A logout before 06:00 the next day DOES carry over and is paid in full
+- A `site` window nested inside a `work` window is paid once, not twice
+- Partially overlapping, touching and disjoint windows union correctly
+- A `No In/Out` row (in == out) pays 0 h and flags `MISSING_PUNCH`
+- A lone scan alongside a genuine window still pays the window
+- A window ending after 06:00 the next day does NOT carry over (0 h, flagged);
+  one ending before 06:00 does and is paid in full
 - Friday → Saturday carry-over retains the 9 h weekday threshold
 - Public holiday falling on a Saturday uses the 0 h threshold
-- Odd punch count produces `MISSING_PUNCH` and 0 hours
-- an employee 3 June — `17:55`/`17:56` double-tap collapses to one punch
-- an employee 8 June — `09:18`/`09:27` are nine minutes apart and stay separate
+- A `Day` column disagreeing with the parsed date raises `LoaderError`
+- Dates parse day-first; the BOM is stripped; banner and blank rows are skipped
+- Employees are keyed on name, so a blank badge does not split a person in two
+- Rest days are listed but do not count as anomalies
 - Month bucket totals sum exactly to Total OT (per-day rounding)
 
-`ZERO_LENGTH` remains as a defensive flag but cannot fire on data that has
-passed the 2-minute collapse (an in==out pair is 0 minutes apart and always
-collapses to a single punch); it is retained only against future changes to the
-collapse step.
+`ZERO_LENGTH` remains as a defensive flag but cannot fire, because the loader
+routes an in == out row to a lone scan before it ever becomes a session. It is
+retained only against future changes to that step.
 
-A golden test asserts the complete June 2026 twelve-employee totals so future
-refactors cannot quietly move payroll numbers. Because `data/` is gitignored, it
-is marked `pytest.mark.skipif` on the file's absence; a clean clone still passes,
-with the fixture-based unit tests carrying the real coverage.
+A golden test asserts the complete Jan–June 2026 totals, all twelve employees
+across six months, so future refactors cannot quietly move payroll numbers.
+Because `data/` is gitignored, it is marked `pytest.mark.skipif` on the file's
+absence; a clean clone still passes, with the fixture-based unit tests carrying
+the real coverage.
 
 ## Repositories
 
@@ -226,9 +233,8 @@ Private repositories on both hosts, pushed from one local repo with two remotes:
 Private because the export contains employee names, badge numbers and GPS
 location links.
 
-`data/*.xlsx` is gitignored. The repository holds code only; attendance files
-stay local. `data/` ships with a `.gitkeep` and a README explaining the
-`<Month Year>.xlsx` naming convention.
+`data/*.csv` and `data/*.xlsx` are gitignored. The repository holds code only;
+attendance files stay local, and uploads are never written to disk.
 
 ## Out of scope
 
