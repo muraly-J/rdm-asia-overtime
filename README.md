@@ -40,9 +40,42 @@ Files kept in `data/` are gitignored and used only by the golden test.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest   # 60 tests; golden test auto-skips without the real CSV
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest   # 55 tests; golden test auto-skips without the real CSV
 ```
+
+`requirements.txt` holds only what the app needs at runtime, so a deployment does
+not install pytest. `requirements-dev.txt` includes it for local work.
+
+## Hosting it (Streamlit Community Cloud)
+
+The app needs no files on disk — attendance comes in by upload — so a fresh
+clone plus `requirements.txt` is enough to run it anywhere. To put it online at
+a URL colleagues can open:
+
+1. Sign in at [share.streamlit.io](https://share.streamlit.io) with the GitHub
+   account that owns this repo, and authorise access to private repositories.
+2. **Create app** → pick this repo, branch `main`, main file `app.py`.
+3. Under **Advanced settings**, set the Python version to **3.14** (what the app
+   is tested on; 3.13 also works). Community Cloud defaults to 3.12.
+4. Deploy.
+
+**Access.** The app inherits the repo's permissions: because this repo is
+private, the app is private too. Anyone you invite views it after signing in
+with Google or a single-use emailed link, and only repo admins can redeploy or
+delete it. Invited viewers get the app, not the repository.
+
+**What this changes.** Running locally, attendance never leaves the machine.
+Hosted, each uploaded CSV is processed on Streamlit's servers instead. Nothing is
+written to disk either way and uploads vanish with the session, but the data does
+transit a third party — worth clearing with whoever owns data policy before
+sharing the URL.
+
+**Free-tier limits.** One private app at a time, 1 GB RAM, and the app sleeps
+after 12 hours idle (the next visitor wakes it, taking a few seconds). The
+monthly export is about 1 MB, so the memory ceiling is not a concern.
+
+Redeploys are automatic: pushing to `main` restarts the app with the new code.
 
 ## Regenerating the golden totals
 

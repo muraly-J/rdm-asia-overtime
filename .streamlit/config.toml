@@ -1,0 +1,7 @@
+# Deployment config. Telemetry off: this app handles employee payroll data.
+[browser]
+gatherUsageStats = false
+
+[server]
+# The monthly export is ~1 MB; 10 MB leaves room without accepting huge uploads.
+maxUploadSize = 10
