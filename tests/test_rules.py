@@ -32,7 +32,10 @@ def test_thresholds():
 
 
 def test_load_holidays_real_file():
+    # years flatten into one date -> name map; adding a year must not break this
     h = load_holidays("holidays.yml")
     assert h[date(2026, 6, 1)] == "Agong's Birthday"
     assert h[date(2026, 12, 25)] == "Christmas Day"
-    assert len(h) == 12
+    assert h[date(2027, 1, 1)] == "New Year's Day"
+    assert sum(1 for d in h if d.year == 2026) == 12
+    assert len(h) == len(set(h))  # no date claimed by two entries

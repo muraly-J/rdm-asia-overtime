@@ -1,5 +1,14 @@
 # Public holidays (Selangor / company-observed).
 # Edit once a year. Dates here use a 0 h overtime threshold (all hours = OT).
+#
+# This is the company's observed subset, not the full gazetted list: Thaipusam,
+# Nuzul Al-Quran, Wesak, Prophet Muhammad's Birthday and Deepavali are gazetted
+# in Selangor but not listed here, and Chinese New Year is one day rather than
+# two. Add a date only when the company actually closes.
+#
+# The Sultan of Selangor's Birthday is gazetted as 11 December; the entries below
+# use 12 November as the company's observed date. Confirm with HR before paying a
+# November or December month.
 2026:
   - date: 2026-01-01
     name: New Year's Day
@@ -24,4 +33,35 @@
   - date: 2026-11-12
     name: Sultan of Selangor's Birthday
   - date: 2026-12-25
+    name: Christmas Day
+
+# 2027 was entered before the Cabinet gazette was published. The fixed-date
+# holidays are certain; the lunar ones (Chinese New Year, both Hari Raya, Awal
+# Muharram) are estimates that can shift by a day, and Agong's Birthday is the
+# first Monday of June by convention. Re-check all five against the gazette
+# before running a 2027 payroll month.
+2027:
+  - date: 2027-01-01
+    name: New Year's Day
+  - date: 2027-02-06
+    name: Chinese New Year
+  - date: 2027-03-10
+    name: Hari Raya Aidilfitri
+  - date: 2027-03-11
+    name: Hari Raya Aidilfitri
+  - date: 2027-05-01
+    name: Labour Day
+  - date: 2027-05-17
+    name: Hari Raya Haji
+  - date: 2027-06-06
+    name: Awal Muharram
+  - date: 2027-06-07
+    name: Agong's Birthday
+  - date: 2027-08-31
+    name: Merdeka Day
+  - date: 2027-09-16
+    name: Malaysia Day
+  - date: 2027-11-12
+    name: Sultan of Selangor's Birthday
+  - date: 2027-12-25
     name: Christmas Day
