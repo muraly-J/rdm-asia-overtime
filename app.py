@@ -18,8 +18,43 @@ from overtime.rules import load_holidays
 
 HOLIDAYS_FILE = "holidays.yml"
 
+FLAG_LEGEND = [
+    ("MISSING_PUNCH",
+     "Someone scanned in but never scanned out.",
+     "**The whole day pays no overtime**, including any complete session that day. "
+     "The hours are still shown so you can see what was worked. Correct the missing "
+     "scan in the attendance system and the day will pay normally."),
+    ("LONG_SESSION",
+     "One unbroken stretch longer than 16 hours.",
+     "These hours **are** counted and paid. Almost always a forgotten scan-out rather "
+     "than a real 16-hour day, so check before paying."),
+    ("NO_PUNCH",
+     "No scans at all that day.",
+     "A rest day, approved leave or an absence. Not an error, and not counted in the "
+     "Anomalies column."),
+    ("OUT_OF_MONTH",
+     "The row is dated outside the month selected above.",
+     "Listed so nothing is silently dropped, but excluded from the totals."),
+    ("ZERO_LENGTH",
+     "Scanned in and out in the same minute.",
+     "Defensive only — it should never appear. Tell whoever maintains this if it does."),
+]
+
 st.set_page_config(page_title="RDM Asia Overtime", layout="wide")
 st.title("RDM Asia — Monthly Overtime")
+
+st.warning(
+    "**Read before paying from these figures.**\n\n"
+    "**Overtime here means hours past a daily threshold** — 9 h Mon–Fri, 5 h Saturday, "
+    "0 h on Sundays and public holidays, counted against the day a shift *started*. "
+    "The attendance system itself credits overtime differently for evening and night "
+    "work: it pays hours outside the rostered shift. Over Jan–Jun 2026 the two "
+    "definitions agreed on only 8% of days. **Until the company confirms which rule "
+    "applies, figures for staff who regularly work evenings or nights are not final.**\n\n"
+    "**A flagged day is a withheld day, not a zero day.** Where a scan is missing the "
+    "hours are shown but no overtime is paid, so a flagged employee's total is a "
+    "*lower bound* until the source data is corrected. Check the Anomalies column and "
+    "the per-employee drilldown below.")
 
 uploads = st.file_uploader(
     "Attendance export (.csv) — all staff in one file",
@@ -108,8 +143,13 @@ summary_df = pd.DataFrame(rows)
 
 st.subheader(f"Summary — {month_name}")
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
-if summary_df["Anomalies"].sum():
-    st.warning("Some days carry anomaly flags — check the drilldown before paying these numbers.")
+
+flagged = int((summary_df["Anomalies"] > 0).sum())
+if flagged:
+    st.info(
+        f"**{flagged} of {len(summary_df)} employees have flagged days this month.** "
+        "Their Total OT is a lower bound — some days are withheld pending corrected "
+        "scans. Open an employee below to see which days and why.")
 
 
 def detail_frame(days: list[DaySummary], selected_month_only: bool = True) -> pd.DataFrame:
@@ -149,6 +189,15 @@ who = st.selectbox("Employee", list(all_days))
 show_all = st.checkbox("Show days outside the selected month", value=False)
 st.dataframe(detail_frame(all_days[who], selected_month_only=not show_all),
              use_container_width=True, hide_index=True)
+
+with st.expander("What the flags mean"):
+    for flag, what, effect in FLAG_LEGEND:
+        st.markdown(f"**`{flag}`** — {what}  \n{effect}")
+    st.caption(
+        "**Export note** repeats what the attendance system itself said about the day "
+        "(rest day, leave, a short day). Its own overtime figure is deliberately not "
+        "shown: it is calculated on different rules, and printing it beside ours put "
+        "two conflicting overtime numbers on one line.")
 
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as xw:
