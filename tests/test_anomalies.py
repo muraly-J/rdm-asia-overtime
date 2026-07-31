@@ -28,7 +28,7 @@ def test_zero_length_session():
 
 
 def test_long_session_over_16h():
-    # an employee-style 21h chain: counted but flagged
+    # a 21 h chain: counted but flagged
     s = [Session(dt("2026-06-10 04:30"), dt("2026-06-11 01:38"))]
     assert day_flags(s, had_row=True) == ["LONG_SESSION"]
 

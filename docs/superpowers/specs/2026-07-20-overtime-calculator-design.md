@@ -81,7 +81,7 @@ the same row; there is no pairing to reconstruct.
 
 **Most days are reported twice.** One row has `Group=work`, another `Group=site`,
 and the two windows overlap — they are two views of the same day, not two stints.
-an employee, 5 January 2026:
+A representative day (5 January 2026):
 
     work:  08:56 -> 23:44
     site:  10:28 -> 23:44

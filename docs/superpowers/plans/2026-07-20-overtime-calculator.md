@@ -225,7 +225,7 @@ def test_pair_cross_midnight_chain():
                  Session(dt("2026-06-05 09:06"), dt("2026-06-06 00:52"))]
 
 
-def test_pair_zarif_four_punch_day():
+def test_pair_four_punch_day():
     # an employee 10 June: 04:30, 11:41, 16:58, 01:38(+1d)
     punches = [dt("2026-06-10 04:30"), dt("2026-06-10 11:41"),
                dt("2026-06-10 16:58"), dt("2026-06-11 01:38")]
@@ -354,7 +354,7 @@ def test_zero_length_session():
 
 
 def test_long_session_over_16h():
-    # an employee-style 21h chain: counted but flagged
+    # a 21 h chain: counted but flagged
     s = [Session(dt("2026-06-10 04:30"), dt("2026-06-11 01:38"))]
     assert day_flags(s, had_row=True) == ["LONG_SESSION"]
 
@@ -829,7 +829,7 @@ print("}")
 
 Run: `.venv/bin/python scripts/golden_dump.py`
 Expected: 12 lines, one per employee. Sanity checks before freezing:
-- an employee `ot_weekday` > 0 (he has several 10–11 h weekdays).
+- `ot_weekday` > 0 (he has several 10–11 h weekdays).
 - an employee and an employee have `anomalies` ≥ 1 (their long cross-midnight chains exceed 16 h).
 - Everyone's `ot_sunday_ph` > 0 if they worked Jun 1, Jun 17, or any Sunday.
 - No negative numbers anywhere.

@@ -8,7 +8,7 @@ def dt(s: str) -> datetime:
 
 
 def test_site_window_inside_work_window_is_not_double_counted():
-    # an employee 5 Jan: work 08:56-23:44, site 10:28-23:44 — the same day seen twice
+    # a real day — work 08:56-23:44, site 10:28-23:44 — the same day seen twice
     sessions = merge_intervals([(dt("2026-01-05 08:56"), dt("2026-01-05 23:44")),
                                 (dt("2026-01-05 10:28"), dt("2026-01-05 23:44"))])
     assert sessions == [Session(dt("2026-01-05 08:56"), dt("2026-01-05 23:44"))]
