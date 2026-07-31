@@ -165,32 +165,30 @@ Loader failures — missing column, unparseable timestamp, a `Day` column that
 disagrees with the date, a half-open or reversed row — raise a Streamlit error
 naming the CSV row. The app never renders a partial total.
 
-## Divergence from the vendor's overtime — OPEN
+## Divergence from the vendor's overtime — SETTLED
 
 Audited 2026-07-30 over Jan–June 2026. The export credits overtime on 1,012
-employee-days; our figure agrees with it on **8%** of them. Three causes:
+employee-days; our figure agrees with it on 8% of them. This is expected, not a
+defect: the two answer different questions. Recorded here so nobody re-opens it.
 
-| Cause | Days | Direction | Status |
-| --- | --- | --- | --- |
-| Public holidays | 15 | ours higher by 5–11 h | Correct — the 0 h threshold is the agreed rule |
-| Evening / night shifts | 548 | **ours lower**, up to 7.7 h | **Unresolved** |
-| Missed-scan days | ~30 | ours higher by 5–11 h | Flagged `LONG_SESSION`, still paid |
+**The thresholds are the rule** — 9 h Mon–Fri, 5 h Saturday, 0 h Sunday and public
+holiday, measured against a day's total hours and attributed to the day the shift
+started. Confirmed by the business owner 2026-07-31. The attendance system's own
+`Overtime N Min` figure is one vendor's calculation, not a second source of truth,
+and carries no authority here. It is stripped from the report rather than shown
+beside ours.
 
-The middle row is the open question. We test a day's *total* hours against the
-day-type threshold. The vendor pays hours worked outside the rostered shift, which
-the `Work Pattern` column (`Option 2`, `Option 3`) identifies and we do not read.
-A 16:43→01:59 shift is 9.27 h, so we credit 0.27 h where the vendor credits 8.00 h;
-a 20:11→00:09 evening stint we credit nothing at all against the vendor's 6.17 h.
+Where the two differ:
 
-Over six months that is **380.8 h of overtime we do not pay**, concentrated on the
-staff who work nights. The holiday and missed-scan causes add 385.9 h back, so the
-net across the company is +5.0 h — the two effects very nearly cancel, which is why
-monthly totals look reasonable while individual employees are tens of hours out in
-opposite directions. Do not read agreeable-looking totals as confirmation.
+| Cause | Days | Direction |
+| --- | --- | --- |
+| Public holidays | 15 | ours higher by 5–11 h — every hour is OT at a 0 h threshold |
+| Evening / night shifts | 548 | ours lower — the vendor credits hours outside a rostered shift, which is not our rule |
+| Missed-scan days | ~30 | ours higher — long spans we count and flag `LONG_SESSION` |
 
-Resolving this needs a ruling from HR on which definition governs: hours past a
-daily threshold, or hours outside the rostered shift. If it is the latter, the
-calculation needs the roster as an input and this design changes materially.
+The `Work Pattern` column (`Option 2`, `Option 3`) is what the vendor reads to
+identify a rostered shift. We deliberately do not: the threshold rule needs only
+the timestamps, so the roster is not an input to this calculation.
 
 ## Architecture
 

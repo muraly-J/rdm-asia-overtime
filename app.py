@@ -43,18 +43,14 @@ FLAG_LEGEND = [
 st.set_page_config(page_title="RDM Asia Overtime", layout="wide")
 st.title("RDM Asia — Monthly Overtime")
 
-st.warning(
-    "**Read before paying from these figures.**\n\n"
-    "**Overtime here means hours past a daily threshold** — 9 h Mon–Fri, 5 h Saturday, "
-    "0 h on Sundays and public holidays, counted against the day a shift *started*. "
-    "The attendance system itself credits overtime differently for evening and night "
-    "work: it pays hours outside the rostered shift. Over Jan–Jun 2026 the two "
-    "definitions agreed on only 8% of days. **Until the company confirms which rule "
-    "applies, figures for staff who regularly work evenings or nights are not final.**\n\n"
+st.info(
+    "**Overtime is hours worked past a daily threshold** — 9 h Mon–Fri, 5 h Saturday, "
+    "0 h on Sundays and public holidays, so on a Sunday or public holiday every hour "
+    "is overtime. A shift counts against the day it *started*, however late it ends.\n\n"
     "**A flagged day is a withheld day, not a zero day.** Where a scan is missing the "
-    "hours are shown but no overtime is paid, so a flagged employee's total is a "
-    "*lower bound* until the source data is corrected. Check the Anomalies column and "
-    "the per-employee drilldown below.")
+    "hours are shown but no overtime is paid for that day, so a flagged employee's "
+    "total is a *lower bound* until the missing scan is corrected in the attendance "
+    "system. Check the Anomalies column and the drilldown below.")
 
 uploads = st.file_uploader(
     "Attendance export (.csv) — all staff in one file",
