@@ -56,6 +56,14 @@ The `Hours` column is **ignored** — hours are recomputed from the timestamps. 
 is not merely redundant but wrong: it reports `25:30:00` on one row and `0:00`
 on rows where a scan is missing.
 
+The vendor's overtime total, appended to the remark as `Overtime N Min`, is
+**stripped** for the same reason. It answers a different question from ours: it
+credits hours worked outside the rostered shift, while we credit hours past a
+daily threshold. Over Jan–June 2026 the two figures agreed on 8% of the 1,012
+days carrying both, and showing them together placed two overtime numbers on one
+report line without saying which was payable. The descriptive part of the remark
+is kept. See "Divergence from the vendor's overtime" below.
+
 Employees are keyed on **`Name`**, not `Badge No.` — two staff have no badge
 number anywhere in the export.
 
@@ -150,6 +158,33 @@ window — the window is paid, and the day is still flagged.
 Loader failures — missing column, unparseable timestamp, a `Day` column that
 disagrees with the date, a half-open or reversed row — raise a Streamlit error
 naming the CSV row. The app never renders a partial total.
+
+## Divergence from the vendor's overtime — OPEN
+
+Audited 2026-07-30 over Jan–June 2026. The export credits overtime on 1,012
+employee-days; our figure agrees with it on **8%** of them. Three causes:
+
+| Cause | Days | Direction | Status |
+| --- | --- | --- | --- |
+| Public holidays | 15 | ours higher by 5–11 h | Correct — the 0 h threshold is the agreed rule |
+| Evening / night shifts | 548 | **ours lower**, up to 7.7 h | **Unresolved** |
+| Missed-scan days | ~30 | ours higher by 5–11 h | Flagged `LONG_SESSION`, still paid |
+
+The middle row is the open question. We test a day's *total* hours against the
+day-type threshold. The vendor pays hours worked outside the rostered shift, which
+the `Work Pattern` column (`Option 2`, `Option 3`) identifies and we do not read.
+A 16:43→01:59 shift is 9.27 h, so we credit 0.27 h where the vendor credits 8.00 h;
+a 20:11→00:09 evening stint we credit nothing at all against the vendor's 6.17 h.
+
+Over six months that is **380.8 h of overtime we do not pay**, concentrated on the
+staff who work nights. The holiday and missed-scan causes add 385.9 h back, so the
+net across the company is +5.0 h — the two effects very nearly cancel, which is why
+monthly totals look reasonable while individual employees are tens of hours out in
+opposite directions. Do not read agreeable-looking totals as confirmation.
+
+Resolving this needs a ruling from HR on which definition governs: hours past a
+daily threshold, or hours outside the rostered shift. If it is the latter, the
+calculation needs the roster as an input and this design changes materially.
 
 ## Architecture
 

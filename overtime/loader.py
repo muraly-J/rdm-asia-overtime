@@ -13,6 +13,7 @@ The vendor 'Hours' column is ignored; hours are recomputed from timestamps.
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -22,6 +23,13 @@ REQUIRED_COLUMNS = ("Badge No.", "Name", "Day", "Date", "Time In", "Time Out")
 BANNER_PREFIX = "──"  # per-employee header row the export injects
 DATE_FMT = "%d/%m/%Y"
 STAMP_FMT = "%d/%m/%Y %H:%M"
+
+# The export's remarks carry the vendor's own overtime total, e.g. "Overtime 218
+# Min". It is computed on different rules from ours - it pays hours outside the
+# rostered shift rather than hours past a daily threshold - so reporting it beside
+# our figure puts two different overtime numbers on one line with nothing to say
+# which one payroll should pay. Strip it; keep the descriptive rest of the remark.
+VENDOR_OVERTIME = re.compile(r"\s*Overtime \d+ Min\s*")
 
 
 class LoaderError(Exception):
@@ -65,6 +73,26 @@ def _parse_date(value: str, row_no: int) -> date:
         raise LoaderError(f"row {row_no}: unparseable date {value!r} (expected d/m/YYYY)") from None
 
 
+def note_atoms(leave: str, remark: str) -> list[str]:
+    """Split one row's Leave/Remark into descriptive phrases, dropping vendor overtime.
+
+    The remark packs several phrases into one field separated by '|', and may
+    append the vendor's overtime total to one of them ("Below Duration Overtime
+    61 Min"). Returns the phrases worth showing, in order; a row whose only
+    content was the overtime total returns nothing.
+    """
+    out: list[str] = []
+    for part in remark.split("|"):
+        cleaned = VENDOR_OVERTIME.sub(" ", part).strip()
+        if cleaned:
+            out.append(cleaned)
+    leave = leave.strip()
+    if leave:
+        # the code qualifies the remark it came with: "AL" + "Leave" -> "AL Leave"
+        out[:1] = [f"{leave} {out[0]}"] if out else [leave]
+    return out
+
+
 def _parse_stamp(value: str, row_no: int, column: str) -> datetime:
     try:
         return datetime.strptime(value.strip(), STAMP_FMT)
@@ -87,6 +115,9 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
         raise LoaderError(f"missing expected column(s): {', '.join(missing)}")
 
     employees: dict[str, EmployeeAttendance] = {}
+    # Phrases per employee-day, deduplicated: the work and site rows of one day
+    # usually repeat the same remark, and printing it twice reads as two findings.
+    atoms: dict[tuple[str, date], list[str]] = {}
     for row_no, row in enumerate(reader, start=2):  # row 1 is the header
         if str(row.get("Branch") or "").startswith(BANNER_PREFIX):
             continue
@@ -106,11 +137,10 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
             emp.badge = (row.get("Badge No.") or "").strip()
         emp.dates_present.add(d)
 
-        note = " ".join(part for part in
-                        ((row.get("Leave") or "").strip(), (row.get("Remark") or "").strip())
-                        if part)
-        if note and note not in emp.notes.get(d, ""):
-            emp.notes[d] = f"{emp.notes[d]}; {note}" if d in emp.notes else note
+        seen = atoms.setdefault((name, d), [])
+        for phrase in note_atoms(row.get("Leave") or "", row.get("Remark") or ""):
+            if phrase not in seen:
+                seen.append(phrase)
 
         raw_in, raw_out = (row.get("Time In") or "").strip(), (row.get("Time Out") or "").strip()
         if not raw_in and not raw_out:
@@ -130,4 +160,7 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
         else:
             emp.intervals.setdefault(d, []).append((start, end))
 
+    for (name, d), phrases in atoms.items():
+        if phrases:
+            employees[name].notes[d] = ", ".join(phrases)
     return list(employees.values())

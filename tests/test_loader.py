@@ -94,6 +94,42 @@ def test_leave_and_remark_are_captured_as_a_note():
     assert emps[0].notes[date(2026, 1, 2)] == "AL Leave"
 
 
+def test_vendor_overtime_total_is_not_reported():
+    # the export's own OT figure is computed on different rules; showing it beside
+    # ours puts two overtime numbers on one line
+    emps = load_attendance(csv_file(
+        row("5/1/2026", "5/1/2026 8:56", "5/1/2026 20:30", remark="Overtime 218 Min")))
+    assert emps[0].notes == {}
+
+
+def test_vendor_overtime_stripped_but_the_rest_of_the_remark_kept():
+    emps = load_attendance(csv_file(
+        row("9/1/2026", "9/1/2026 8:53", "9/1/2026 17:42", remark="Below Duration Overtime 61 Min")))
+    assert emps[0].notes[date(2026, 1, 9)] == "Below Duration"
+
+
+def test_pipe_separated_remark_splits_into_phrases():
+    emps = load_attendance(csv_file(
+        row("28/2/2026", "28/2/2026 9:44", "28/2/2026 14:32",
+            remark="No WorkPattern | >Rest day")))
+    assert emps[0].notes[date(2026, 2, 28)] == "No WorkPattern, >Rest day"
+
+
+def test_same_remark_on_work_and_site_rows_is_not_repeated():
+    emps = load_attendance(csv_file(
+        row("9/1/2026", "9/1/2026 8:53", "9/1/2026 17:42", group="work", remark="Below Duration"),
+        row("9/1/2026", "9/1/2026 16:52", "9/1/2026 17:42", group="site", remark="Below Duration")))
+    assert emps[0].notes[date(2026, 1, 9)] == "Below Duration"
+
+
+def test_distinct_remarks_on_one_day_are_both_kept():
+    emps = load_attendance(csv_file(
+        row("20/1/2026", "20/1/2026 9:14", "20/1/2026 9:14", group="work", remark="No In/Out"),
+        row("20/1/2026", "20/1/2026 10:00", "20/1/2026 18:00", group="site",
+            remark="Below Duration")))
+    assert emps[0].notes[date(2026, 1, 20)] == "No In/Out, Below Duration"
+
+
 def test_half_open_row_is_rejected():
     with pytest.raises(LoaderError, match="only one of Time In"):
         load_attendance(csv_file(row("5/1/2026", "5/1/2026 8:56", "")))

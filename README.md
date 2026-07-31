@@ -111,6 +111,13 @@ A non-zero **Anomalies** count means the employee's total is not payable until t
 The drilldown also shows the export's own `Leave`/`Remark` text per day, so a
 flagged day can usually be judged without opening the CSV.
 
+**The vendor's own overtime total is deliberately not shown.** The remark field
+carries one (`Overtime 218 Min`), but it is computed on different rules: it pays
+hours worked outside the rostered shift, where we pay hours past a daily
+threshold. Over Jan–Jun 2026 the two agreed on only 8% of days, and printing both
+put two different overtime figures on one line with nothing to say which one
+payroll should pay. The rest of each remark is kept.
+
 Across the Jan–June 2026 back-fill, three to five of the twelve employees are
 anomaly-free in any given month, with 28–69 flagged days per month. Flagged
 employees' `ot_total` is a lower bound, not a final figure, until the missing
