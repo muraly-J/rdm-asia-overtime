@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from .rules import THRESHOLDS, day_type
 
-CARRYOVER_BEFORE_HOUR = 6
 
 
 @dataclass(frozen=True)
@@ -36,19 +35,6 @@ def merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[Session]
         else:
             merged.append([start, end])
     return [Session(a, b) for a, b in merged]
-
-
-def _within_carryover(start: datetime, end: datetime) -> bool:
-    """True if `end` is a plausible clock-out for a shift starting at `start`.
-
-    A shift may run past midnight, but only until CARRYOVER_BEFORE_HOUR the
-    next morning. A later clock-out means a scan was missed, so the window is
-    not treated as worked time.
-    """
-    if end.date() == start.date():
-        return True
-    return (end.date() == start.date() + timedelta(days=1)
-            and end.hour < CARRYOVER_BEFORE_HOUR)
 
 
 @dataclass
@@ -82,26 +68,24 @@ def summarize_days(
 
     summaries: list[DaySummary] = []
     for d in all_days:
-        paired, unpaired = [], list(dangling_by_day.get(d, []))
-        for start, end in intervals_by_day.get(d, []):
-            if _within_carryover(start, end):
-                paired.append((start, end))
-            else:
-                unpaired.append(start)  # missed scan, not a multi-day shift
-
-        sessions = merge_intervals(paired)
-        sessions.extend(Session(t, None) for t in sorted(unpaired))
+        # A session belongs to the day it started on, however late it ends: a
+        # Saturday 17:00 -> Sunday 10:00 shift is 17 h of Saturday work.
+        unpaired = sorted(dangling_by_day.get(d, []))
+        sessions = merge_intervals(intervals_by_day.get(d, []))
+        sessions.extend(Session(t, None) for t in unpaired)
 
         dtype = day_type(d, holidays)
         worked = sum(s.hours for s in sessions)
         threshold = THRESHOLDS[dtype]
+        # A start log with no end log leaves the day incomplete, so no overtime
+        # is calculated for it at all - not even on the sessions that did close.
+        overtime = 0.0 if unpaired else max(0.0, worked - threshold)
         flags = day_flags(sessions, had_row=d in dates_present)
         in_month = (d.year, d.month) == month
         if not in_month:
             flags.append("OUT_OF_MONTH")
         summaries.append(DaySummary(employee, d, dtype, sessions, worked, threshold,
-                                    max(0.0, worked - threshold), flags, in_month,
-                                    notes.get(d, "")))
+                                    overtime, flags, in_month, notes.get(d, "")))
     return summaries
 
 

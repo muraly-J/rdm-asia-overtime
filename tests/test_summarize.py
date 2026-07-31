@@ -82,19 +82,24 @@ def test_cross_midnight_belongs_to_login_date():
     assert sat.worked_hours == 0.0 and sat.flags == ["NO_PUNCH"]
 
 
-def test_logout_after_0600_cutoff_is_treated_as_a_missed_scan():
-    # 17:53 -> next day 08:53 cannot be one shift; pay nothing and flag it
-    s = summarize([("2026-06-15 17:53", "2026-06-16 08:53")])
-    d = find(s, date(2026, 6, 15))
-    assert d.worked_hours == 0.0
-    assert "MISSING_PUNCH" in d.flags
+def test_shift_belongs_to_its_start_day_however_late_it_ends():
+    # Sat 17:00 -> Sun 10:00 is 17 h of Saturday work: 5 h threshold, 12 h OT.
+    # Sunday is left untouched.
+    s = summarize([("2026-06-06 17:00", "2026-06-07 10:00")],
+                  dates=["2026-06-06", "2026-06-07"])
+    sat, sun = find(s, date(2026, 6, 6)), find(s, date(2026, 6, 7))
+    assert sat.day_type == "saturday"
+    assert sat.worked_hours == 17.0
+    assert sat.overtime_hours == 12.0
+    assert sat.flags == ["LONG_SESSION"]  # over 16 h: paid, but flagged for a check
+    assert sun.worked_hours == 0.0 and sun.flags == ["NO_PUNCH"]
 
 
-def test_logout_just_before_0600_cutoff_still_carries():
-    s = summarize([("2026-06-15 21:00", "2026-06-16 05:59")])
+def test_end_log_two_days_later_still_counts_on_the_start_day():
+    s = summarize([("2026-06-15 17:53", "2026-06-17 08:53")])
     d = find(s, date(2026, 6, 15))
-    assert round(d.worked_hours, 2) == 8.98
-    assert d.flags == []
+    assert round(d.worked_hours, 2) == 39.0
+    assert "LONG_SESSION" in d.flags  # counted, but loudly flagged
 
 
 def test_lone_scan_pays_nothing_and_is_flagged():
@@ -102,14 +107,17 @@ def test_lone_scan_pays_nothing_and_is_flagged():
     s = summarize([], dangling=["2026-06-02 09:14"])
     d = find(s, date(2026, 6, 2))
     assert d.worked_hours == 0.0
+    assert d.overtime_hours == 0.0
     assert "MISSING_PUNCH" in d.flags
 
 
-def test_lone_scan_alongside_a_real_window_still_pays_the_window():
-    # an employee 8 Jan shape: zero-length work row plus a genuine site window
-    s = summarize([("2026-06-08 09:45", "2026-06-08 18:45")], dangling=["2026-06-08 08:20"])
+def test_a_missing_end_log_suppresses_overtime_for_the_whole_day():
+    # the day is incomplete, so no OT is calculated for it - not even on the
+    # session that did close
+    s = summarize([("2026-06-08 09:45", "2026-06-08 21:45")], dangling=["2026-06-08 08:20"])
     d = find(s, date(2026, 6, 8))
-    assert d.worked_hours == 9.0
+    assert d.worked_hours == 12.0     # hours still reported
+    assert d.overtime_hours == 0.0    # but no overtime paid
     assert "MISSING_PUNCH" in d.flags
 
 

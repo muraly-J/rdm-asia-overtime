@@ -29,10 +29,17 @@ Thresholds by day type — overtime is worked hours above the threshold:
 
 Public holiday takes precedence over Saturday.
 
-A shift may run past midnight. Every session is attributed in full to its **login
-date**: a session starting Friday 09:00 and ending Saturday 00:21 counts entirely
-as Friday, at the 9 h weekday threshold. Day type is likewise determined by the
-login date.
+A shift may run past midnight. Every session is attributed in full to the day it
+**started**, however late it ends — there is no cut-off hour. A shift beginning
+Saturday 17:00 and ending Sunday 10:00 is 17 h of Saturday work: the 5 h Saturday
+threshold applies, giving 12 h of Saturday overtime, and Sunday is untouched. Day
+type is likewise determined by the start date.
+
+If a start log has no matching end log, the day is incomplete and **no overtime is
+calculated for that day**, including for sessions that did close. Hours are still
+reported so the gap is visible; nothing is paid until the scan is fixed at source.
+(Revised 2026-07-31, superseding an earlier 06:00 carry-over cut-off that treated
+a late clock-out as a missed scan.)
 
 Overtime is reported to two decimal places. No rounding to quarter or half
 hours; payroll applies its own rounding downstream if it wants one. Each day's
@@ -87,8 +94,8 @@ visit before the office scan — the union keeps them separate and they add up.
 **A lone scan is written as `Time In == Time Out`** (remark `No In/Out`, 248 rows).
 The employee scanned once and the partner scan is missing.
 
-**Cross-midnight windows are already attributed to the login date** by the export,
-and all 186 of them end before 06:00.
+**Cross-midnight windows are already attributed to the login date** by the export;
+186 rows cross midnight and all currently end before 06:00.
 
 **Days with no times at all** carry `Rest day`, `Absent`, `Leave` or `Half Day`
 in the `Remark`/`Leave` columns.
@@ -110,16 +117,14 @@ in the `Remark`/`Leave` columns.
    duplicate rows being counted twice. There is no gap tolerance — windows merge
    only where they actually meet.
 
-   **Carry-over cutoff.** A window may cross midnight only when it ends **before
-   06:00** the next day. A later end means a scan was missed, so the window does
-   not become worked time; its start is recorded as a lone scan instead
-   (0 h, `MISSING_PUNCH`). No data in the six-month file trips this, but a
-   forgotten scan would otherwise pay a multi-day shift, so the guard stays.
-3. **Attribute.** Assign each merged session to `login.date()`.
+3. **Attribute.** Assign each merged session to `login.date()`, whatever hour it
+   ended — a window is never rejected for running long.
 4. **Aggregate.** Day worked hours = sum of the merged sessions' durations. Lone
    scans contribute 0 h and raise a flag.
-5. **Classify.** Determine day type from the login date and `holidays.yml`.
-6. **Compute.** `overtime = max(0, worked_hours - threshold(day_type))`.
+5. **Classify.** Determine day type from the start date and `holidays.yml`.
+6. **Compute.** `overtime = max(0, worked_hours - threshold(day_type))` — except
+   on a day holding a start log with no end log, where overtime is 0 regardless
+   of hours worked.
 
 Days outside the selected month are excluded from totals but listed in the
 drilldown with an `OUT_OF_MONTH` flag.
@@ -145,15 +150,16 @@ computed per employee-day, shown in the drilldown and counted in the summary:
 
 | Flag            | Condition                             | Effect on hours          |
 | --------------- | ------------------------------------- | ------------------------ |
-| `MISSING_PUNCH` | lone scan (`No In/Out`, or a window past the 06:00 cutoff) | 0 h for that scan |
+| `MISSING_PUNCH` | a start log with no end log (`No In/Out`) | **whole day's overtime withheld** |
 | `ZERO_LENGTH`   | login == logout                       | 0 h                      |
 | `LONG_SESSION`  | single merged session > 16 h          | counted, flagged loudly  |
 | `NO_PUNCH`      | day reported with no timestamps       | 0 h, informational only  |
 | `OUT_OF_MONTH`  | date outside selected month           | excluded from totals     |
 
 A lone scan is never estimated or extrapolated. It reads 0 hours and requires a
-human to correct the source data. A day can hold both a lone scan and a genuine
-window — the window is paid, and the day is still flagged.
+human to correct the source data. Where a day holds both a lone scan and a
+complete window, the hours are reported but the day pays no overtime: an
+unverifiable day is withheld rather than part-paid.
 
 Loader failures — missing column, unparseable timestamp, a `Day` column that
 disagrees with the date, a half-open or reversed row — raise a Streamlit error
@@ -238,9 +244,11 @@ becomes a named test:
 - Partially overlapping, touching and disjoint windows union correctly
 - A `No In/Out` row (in == out) pays 0 h and flags `MISSING_PUNCH`
 - A lone scan alongside a genuine window still pays the window
-- A window ending after 06:00 the next day does NOT carry over (0 h, flagged);
-  one ending before 06:00 does and is paid in full
-- Friday → Saturday carry-over retains the 9 h weekday threshold
+- A Saturday 17:00 → Sunday 10:00 shift is 17 h of Saturday work: 12 h Saturday
+  overtime, Sunday untouched
+- An end log two days after the start still counts on the start day
+- A start log with no end log withholds the whole day's overtime, including any
+  session that did close
 - Public holiday falling on a Saturday uses the 0 h threshold
 - A `Day` column disagreeing with the parsed date raises `LoaderError`
 - Dates parse day-first; the BOM is stripped; banner and blank rows are skipped

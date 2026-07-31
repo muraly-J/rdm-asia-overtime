@@ -11,11 +11,16 @@ staff) and calculates overtime.
 | Saturday | 5 h |
 | Sunday / public holiday | 0 h (all hours are OT) |
 
-Shifts crossing midnight count entirely toward the **login** date, but only when
-the clock-out lands before **06:00** the next morning. A later "logout" means a
-scan was missed — that window is flagged `MISSING_PUNCH` and pays 0 h rather
-than inventing a multi-day shift. Public holidays live in `holidays.yml` — edit
-once a year.
+A shift counts entirely toward the day it **started**, however late it ends. Log
+in Saturday 17:00 and out Sunday 10:00 and that is 17 h of Saturday work: past
+the 5 h Saturday threshold, so 12 h of Saturday overtime, and Sunday is untouched.
+
+If a start log has **no end log**, the day is incomplete: it is flagged
+`MISSING_PUNCH` and **no overtime is calculated for that day at all** — not even
+on the sessions that did close. The hours are still shown, but nothing is paid
+until the missing scan is corrected at source.
+
+Public holidays live in `holidays.yml` — edit once a year.
 
 The export reports most days **twice**, once as `Group=work` and once as
 `Group=site`, with the two windows overlapping. These are two views of the same
@@ -102,7 +107,7 @@ Overtime hours are reported exact to 2 decimal places. Each employee's row shows
 
 A non-zero **Anomalies** count means the employee's total is not payable until the flagged days are checked. Flags are:
 
-- **`MISSING_PUNCH`** — a lone scan: the export recorded a clock-in with no clock-out (written as `Time In == Time Out`, remark `No In/Out`), or a window running past the 06:00 cut-off. That scan counts 0 h; the real time must be supplied at source before it can be paid. A day can hold both a lone scan and a genuine window — the window is still paid, and the day is still flagged
+- **`MISSING_PUNCH`** — a start log with no end log (the export writes it as `Time In == Time Out`, remark `No In/Out`). **The whole day's overtime is withheld**, including any session that did close, because the day cannot be verified. Hours are still displayed; the missing scan must be corrected at source before that day pays
 - **`LONG_SESSION`** — a single merged session over 16 h. The hours ARE counted toward the total, so check these before paying
 - **`ZERO_LENGTH`** — scan in and out at the same minute (defensive; the loader routes these to `MISSING_PUNCH` before they become a session)
 - **`NO_PUNCH`** — no scans that day (rest day, leave or absence); informational, not an error, and not counted in the anomaly total
