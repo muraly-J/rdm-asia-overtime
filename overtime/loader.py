@@ -31,8 +31,12 @@ DATE_LABEL = "d/m/YYYY or YYYY-MM-DD"
 STAMP_FORMATS = (
     "%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S",
     "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S",
+    # The export can also be configured for 12-hour clocks ("08:58 AM"). The AM/PM
+    # marker makes these unambiguous against the 24-hour renderings above.
+    "%d/%m/%Y %I:%M %p", "%d/%m/%Y %I:%M:%S %p",
+    "%Y-%m-%d %I:%M %p", "%Y-%m-%d %I:%M:%S %p",
 )
-STAMP_LABEL = "'d/m/YYYY H:MM' or 'YYYY-MM-DD H:MM'"
+STAMP_LABEL = "'d/m/YYYY H:MM' or 'YYYY-MM-DD H:MM', 24-hour or with AM/PM"
 
 # The export's remarks carry the vendor's own overtime total, e.g. "Overtime 218
 # Min". It is computed on different rules from ours - it pays hours outside the
@@ -194,18 +198,21 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
             raise LoaderError(
                 f"row {row_no}: {name} on {d:%d/%m/%Y} has only one of Time In / Time Out")
 
-        # The windows are unioned on the understanding that 'work' and 'site' are two
-        # views of the same day rather than two separate stints. A third kind of
-        # window would be folded into the same hours with nothing to say whether
-        # that is right. Timeless rows are left alone: theirs is legitimately blank.
+        start = stamps.parse(raw_in, row_no, "Time In")
+        end = stamps.parse(raw_out, row_no, "Time Out")
+
+        # The windows are unioned on the understanding that 'work' and 'site' are
+        # two views of the same day rather than two separate stints; a third kind
+        # of window would be folded into the same hours with nothing to say whether
+        # that is right. One exception, seen in the real export: a lone echo of a
+        # single scan (in == out, remark 'No WorkPattern') carries a blank Group.
+        # It holds no hours, so letting it through cannot move a figure - it lands
+        # as a dangling scan and flags the day like any other lone scan.
         group = (row.get("Group") or "").strip()
-        if group not in ("work", "site"):
+        if group not in ("work", "site") and not (group == "" and start == end):
             raise LoaderError(
                 f"row {row_no}: unrecognised Group {group!r} on a row with clock times "
                 "— only 'work' and 'site' windows are known to combine")
-
-        start = stamps.parse(raw_in, row_no, "Time In")
-        end = stamps.parse(raw_out, row_no, "Time Out")
         # A shift is charged to the day it started and the Date column decides that.
         # Were the export ever to date a night shift by the day it ended, hours would
         # move between day types - and across months - with nothing to show for it.

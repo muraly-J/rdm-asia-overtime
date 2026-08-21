@@ -258,3 +258,40 @@ def test_a_shift_may_still_end_on_the_following_day():
         row("3/1/2026", "3/1/2026 17:00", "4/1/2026 10:00", day="Sat")))
     assert emps[0].intervals == {
         date(2026, 1, 3): [(datetime(2026, 1, 3, 17, 0), datetime(2026, 1, 4, 10, 0))]}
+
+
+def test_twelve_hour_stamps_are_read():
+    # the export can render 12-hour clocks: '2026-07-01 08:58 AM'
+    emps = load_attendance(csv_file(
+        row("2026-01-05", "2026-01-05 08:58 AM", "2026-01-05 06:15 PM", day="Monday")))
+    assert emps[0].intervals == {
+        date(2026, 1, 5): [(datetime(2026, 1, 5, 8, 58), datetime(2026, 1, 5, 18, 15))]}
+
+
+def test_twelve_hour_midnight_and_noon_parse_correctly():
+    # the classic 12-hour bug: 12:xx AM is 00:xx, 12:xx PM is 12:xx
+    emps = load_attendance(csv_file(
+        row("3/1/2026", "3/1/2026 12:05 AM", "3/1/2026 12:30 PM", day="Sat")))
+    assert emps[0].intervals == {
+        date(2026, 1, 3): [(datetime(2026, 1, 3, 0, 5), datetime(2026, 1, 3, 12, 30))]}
+
+
+def test_twelve_and_twenty_four_hour_files_agree():
+    h24 = load_attendance(csv_file(row("5/1/2026", "5/1/2026 8:58", "5/1/2026 18:15")))
+    h12 = load_attendance(csv_file(
+        row("2026-01-05", "2026-01-05 08:58 AM", "2026-01-05 06:15 PM", day="Monday")))
+    assert h24[0].intervals == h12[0].intervals
+
+
+def test_blank_group_is_allowed_on_a_lone_echo_scan():
+    # the export writes a pattern-less echo of one scan with in == out and no Group;
+    # it carries no hours, so it lands as a dangling scan like any other lone scan
+    emps = load_attendance(csv_file(
+        row("5/1/2026", "5/1/2026 17:25", "5/1/2026 17:25", group="")))
+    assert emps[0].dangling == {date(2026, 1, 5): [datetime(2026, 1, 5, 17, 25)]}
+
+
+def test_blank_group_on_a_real_window_is_still_rejected():
+    with pytest.raises(LoaderError, match="unrecognised Group"):
+        load_attendance(csv_file(
+            row("5/1/2026", "5/1/2026 8:58", "5/1/2026 17:25", group="")))
