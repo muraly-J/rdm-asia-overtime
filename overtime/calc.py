@@ -102,9 +102,11 @@ def summarize_employee(
 def month_totals(summaries: list[DaySummary]) -> dict:
     """Aggregate one employee's month. Out-of-month days are excluded."""
     t = {"worked": 0.0, "ot_weekday": 0.0, "ot_saturday": 0.0,
-         "ot_sunday_ph": 0.0, "ot_total": 0.0, "anomalies": 0}
+         "ot_sunday": 0.0, "ot_holiday": 0.0, "ot_total": 0.0, "anomalies": 0}
+    # Sundays and public holidays share a 0 h threshold but are paid at
+    # different rates, so they are reported apart.
     bucket = {"weekday": "ot_weekday", "saturday": "ot_saturday",
-              "sunday": "ot_sunday_ph", "holiday": "ot_sunday_ph"}
+              "sunday": "ot_sunday", "holiday": "ot_holiday"}
     for s in summaries:
         if not s.in_month:
             continue
@@ -114,7 +116,8 @@ def month_totals(summaries: list[DaySummary]) -> dict:
         if any(f != "NO_PUNCH" for f in s.flags):
             t["anomalies"] += 1
     t["worked"] = round(t["worked"], 2)
-    for k in ("ot_weekday", "ot_saturday", "ot_sunday_ph"):
+    for k in ("ot_weekday", "ot_saturday", "ot_sunday", "ot_holiday"):
         t[k] = round(t[k], 2)
-    t["ot_total"] = round(t["ot_weekday"] + t["ot_saturday"] + t["ot_sunday_ph"], 2)
+    t["ot_total"] = round(t["ot_weekday"] + t["ot_saturday"]
+                          + t["ot_sunday"] + t["ot_holiday"], 2)
     return t

@@ -139,7 +139,8 @@ def test_month_totals_buckets():
     t = month_totals(s)
     assert t["ot_weekday"] == 1.73
     assert t["ot_saturday"] == 2.0
-    assert t["ot_sunday_ph"] == 7.0
+    assert t["ot_sunday"] == 4.0
+    assert t["ot_holiday"] == 3.0
     assert t["ot_total"] == 10.73
     assert t["anomalies"] == 0
 
@@ -157,5 +158,6 @@ def test_totals_reconcile():
                    ("2026-06-03 09:04", "2026-06-03 19:48"),
                    ("2026-06-04 09:04", "2026-06-04 19:48")])
     t = month_totals(s)
-    assert t["ot_total"] == round(t["ot_weekday"] + t["ot_saturday"] + t["ot_sunday_ph"], 2)
+    assert t["ot_total"] == round(t["ot_weekday"] + t["ot_saturday"]
+                                  + t["ot_sunday"] + t["ot_holiday"], 2)
     assert t["ot_total"] == 5.19

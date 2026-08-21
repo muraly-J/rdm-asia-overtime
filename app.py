@@ -115,7 +115,7 @@ month_name = f"{date(month[0], month[1], 1):%B %Y}"
 # wrong numbers that look normal. Every public holiday that year would be measured
 # against the 9 h weekday threshold instead of 0 h — on the real June 2026 export
 # that is 95.35 h of overtime lost across 9 of the 12 staff, and 120 h moved out of
-# the Sun/PH column into the weekday one, which is paid at a different rate.
+# the PH column into the weekday one, which is paid at a different rate.
 if month[0] not in {d.year for d in holidays}:
     st.error(
         f"**{HOLIDAYS_FILE} has no public holidays for {month[0]}, so {month_name} "
@@ -139,7 +139,8 @@ for emp in staff:
     t = month_totals(days)
     rows.append({"Employee": emp.name, "Badge": emp.badge,
                  "Worked (h)": t["worked"], "Weekday OT": t["ot_weekday"],
-                 "Saturday OT": t["ot_saturday"], "Sun/PH OT": t["ot_sunday_ph"],
+                 "Saturday OT": t["ot_saturday"], "Sunday OT": t["ot_sunday"],
+                 "PH OT": t["ot_holiday"],
                  "Total OT": t["ot_total"], "Anomalies": t["anomalies"]})
 
 summary_df = pd.DataFrame(rows)

@@ -105,7 +105,8 @@ Overtime hours are reported exact to 2 decimal places. Each employee's row shows
 - `worked` — total hours in the month
 - `ot_weekday` — overtime on Mon–Fri (after 9 h/day)
 - `ot_saturday` — overtime on Saturday (after 5 h/day)
-- `ot_sunday_ph` — overtime on Sunday or public holiday (0 h threshold; all hours are OT)
+- `ot_sunday` — overtime on Sunday (0 h threshold; all hours are OT)
+- `ot_holiday` — overtime on a public holiday (0 h threshold; all hours are OT; reported apart from Sunday because the rates differ)
 - `ot_total` — sum of all overtime
 - `anomalies` — count of flagged data-quality issues
 
@@ -143,7 +144,7 @@ warning about it: an uncovered year is not a caveat on the figures, it is figure
 that look normal and are wrong, because every public holiday in it would be
 measured against the 9 h weekday threshold instead of 0 h. On the real June 2026
 export that is 95.35 h of overtime lost across 9 of the 12 staff, with 120 h moved
-out of the Sun/PH column into the weekday one, which is paid at a different rate.
+out of the PH column into the weekday one, which is paid at a different rate.
 
 `test_holidays_cover_the_next_six_months` fails in the ordinary test run once the
 file is within six months of running out, so the gap surfaces here rather than in
