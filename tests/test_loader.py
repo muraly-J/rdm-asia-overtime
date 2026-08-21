@@ -12,7 +12,9 @@ BANNER = "── ALICE WONG [Badge: 10099] | TECHNICAL | RDM_HQ,,,,,,,,,,,,,,,,,
 
 def row(d: str, tin: str, tout: str, *, name="ALICE WONG BINTI X", badge="10099",
         group="work", leave="", remark="", day=None):
-    day = day or datetime.strptime(d, "%d/%m/%Y").strftime("%a")
+    # `or` would collapse an intentionally empty Day back to the derived one
+    if day is None:
+        day = datetime.strptime(d, "%d/%m/%Y").strftime("%a")
     return (f"RDM_HQ,TECHNICAL,,Option 2,{badge},{name},,Employee,{day},{d},"
             f"{tin},,{tout},,0:00,{group},{leave},{remark}")
 
@@ -194,3 +196,65 @@ def test_formats_are_decided_per_value_not_per_file():
         row("5/1/2026", "5/1/2026 8:56", "2026-01-05 17:30")))
     assert emps[0].intervals == {
         date(2026, 1, 5): [(datetime(2026, 1, 5, 8, 56), datetime(2026, 1, 5, 17, 30))]}
+
+
+# --- guards on what the export is assumed to look like -----------------------
+
+def test_blank_day_column_is_rejected():
+    # the weekday cross-check is what makes multi-format date parsing safe, so an
+    # empty Day cell is a missing guard rather than a missing detail
+    with pytest.raises(LoaderError, match="Day column is empty"):
+        load_attendance(csv_file(row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30", day="")))
+
+
+def test_nameless_row_with_times_is_rejected():
+    with pytest.raises(LoaderError, match="no Name"):
+        load_attendance(csv_file(row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30", name="")))
+
+
+def test_nameless_row_without_times_is_still_skipped():
+    emps = load_attendance(csv_file(
+        row("5/1/2026", "", "", name=""),
+        row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30")))
+    assert len(emps) == 1
+
+
+def test_badge_changing_under_one_name_is_rejected():
+    with pytest.raises(LoaderError, match="two different people sharing a name"):
+        load_attendance(csv_file(
+            row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30", badge="10099"),
+            row("6/1/2026", "6/1/2026 8:56", "6/1/2026 17:30", badge="10100")))
+
+
+def test_a_blank_badge_does_not_count_as_a_conflict():
+    emps = load_attendance(csv_file(
+        row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30", badge=""),
+        row("6/1/2026", "6/1/2026 8:56", "6/1/2026 17:30", badge="10099")))
+    assert emps[0].badge == "10099"
+
+
+def test_unknown_group_on_a_timed_row_is_rejected():
+    # the union treats work/site as two views of one day; a third kind is unknown
+    with pytest.raises(LoaderError, match="unrecognised Group"):
+        load_attendance(csv_file(
+            row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30", group="overtime")))
+
+
+def test_blank_group_is_allowed_on_a_row_without_times():
+    emps = load_attendance(csv_file(row("5/1/2026", "", "", group="")))
+    assert emps[0].dates_present == {date(2026, 1, 5)}
+    assert emps[0].intervals == {}
+
+
+def test_time_in_off_its_date_is_rejected():
+    # a shift is charged to the day it started, and Date is what decides that
+    with pytest.raises(LoaderError, match="charged to the day it started"):
+        load_attendance(csv_file(
+            row("6/1/2026", "5/1/2026 22:00", "6/1/2026 6:00", day="Tue")))
+
+
+def test_a_shift_may_still_end_on_the_following_day():
+    emps = load_attendance(csv_file(
+        row("3/1/2026", "3/1/2026 17:00", "4/1/2026 10:00", day="Sat")))
+    assert emps[0].intervals == {
+        date(2026, 1, 3): [(datetime(2026, 1, 3, 17, 0), datetime(2026, 1, 4, 10, 0))]}

@@ -13,7 +13,8 @@ import pandas as pd
 import streamlit as st
 
 from overtime.calc import DaySummary, month_totals, summarize_employee
-from overtime.loader import EmployeeAttendance, load_attendance
+from overtime.loader import EmployeeAttendance, LoaderError, load_attendance
+from overtime.merge import merge_files
 from overtime.rules import load_holidays
 
 HOLIDAYS_FILE = "holidays.yml"
@@ -65,30 +66,28 @@ if not uploads:
 @st.cache_data(show_spinner="Reading attendance…")
 def read_uploads(files: list[tuple[str, bytes]]) -> list[EmployeeAttendance]:
     """Parse each uploaded CSV, merging employees that appear in more than one."""
-    merged: dict[str, EmployeeAttendance] = {}
+    parsed: list[tuple[str, list[EmployeeAttendance]]] = []
     for name, blob in files:
         try:
             records = load_attendance(io.BytesIO(blob))
+        except LoaderError as e:
+            # already a sentence naming a row and a column; only the file is missing
+            raise LoaderError(f"{name}: {e}") from e
         except Exception as e:
             raise RuntimeError(f"{name}: {type(e).__name__}: {e}") from e
-        for emp in records:
-            existing = merged.get(emp.name)
-            if existing is None:
-                merged[emp.name] = emp
-                continue
-            for d, ivs in emp.intervals.items():
-                existing.intervals.setdefault(d, []).extend(ivs)
-            for d, stamps in emp.dangling.items():
-                existing.dangling.setdefault(d, []).extend(stamps)
-            existing.dates_present |= emp.dates_present
-            existing.notes.update(emp.notes)
-            existing.badge = existing.badge or emp.badge
-    return sorted(merged.values(), key=lambda e: e.name)
+        parsed.append((name, records))
+    return merge_files(parsed)
 
 
 try:
     holidays = load_holidays(HOLIDAYS_FILE)
     staff = read_uploads([(f.name, f.getvalue()) for f in uploads])
+except LoaderError as e:
+    st.error(
+        f"**Could not read the upload — nothing was calculated.**\n\n{e}\n\n"
+        f"None of the {len(uploads)} uploaded file(s) were processed. Fix or remove "
+        "that file and upload again.")
+    st.stop()
 except Exception as e:
     st.error(f"Failed to load data: {type(e).__name__}: {e}")
     st.stop()
@@ -112,11 +111,19 @@ month = st.sidebar.selectbox(
     format_func=lambda m: f"{date(m[0], m[1], 1):%B %Y}")
 month_name = f"{date(month[0], month[1], 1):%B %Y}"
 
+# Refuse rather than warn: an uncovered year is not a caveat on the numbers, it is
+# wrong numbers that look normal. Every public holiday that year would be measured
+# against the 9 h weekday threshold instead of 0 h — on the real June 2026 export
+# that is 95.35 h of overtime lost across 9 of the 12 staff, and 120 h moved out of
+# the Sun/PH column into the weekday one, which is paid at a different rate.
 if month[0] not in {d.year for d in holidays}:
-    st.warning(
-        f"{HOLIDAYS_FILE} has no entries for {month[0]} — public holidays that month "
-        "will be treated as ordinary days and their overtime under-counted. "
-        "Add the year to the file before paying these numbers.")
+    st.error(
+        f"**{HOLIDAYS_FILE} has no public holidays for {month[0]}, so {month_name} "
+        "cannot be calculated.** Every public holiday that year would count as an "
+        "ordinary working day and its overtime be under-paid.\n\n"
+        "If you uploaded more than one month, choose a different month in the sidebar. "
+        f"Otherwise {month[0]}'s public holidays need adding to {HOLIDAYS_FILE} first.")
+    st.stop()
 
 month_hols = {d: n for d, n in holidays.items() if (d.year, d.month) == month}
 if month_hols:
@@ -138,7 +145,7 @@ for emp in staff:
 summary_df = pd.DataFrame(rows)
 
 st.subheader(f"Summary — {month_name}")
-st.dataframe(summary_df, use_container_width=True, hide_index=True)
+st.dataframe(summary_df, hide_index=True)
 
 flagged = int((summary_df["Anomalies"] > 0).sum())
 if flagged:
@@ -184,7 +191,7 @@ who = st.selectbox("Employee", list(all_days))
 # under every other month's rows, all flagged OUT_OF_MONTH.
 show_all = st.checkbox("Show days outside the selected month", value=False)
 st.dataframe(detail_frame(all_days[who], selected_month_only=not show_all),
-             use_container_width=True, hide_index=True)
+             hide_index=True)
 
 with st.expander("What the flags mean"):
     for flag, what, effect in FLAG_LEGEND:

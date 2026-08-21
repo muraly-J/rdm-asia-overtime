@@ -1,3 +1,6 @@
+# Tested on Python 3.14 (what Community Cloud is configured to run for this app,
+# set under Advanced settings at deploy time). The Codespace image is 3.13 - the
+# closest devcontainers/python tag published.
 streamlit==1.59.2
 pandas==3.0.3
 openpyxl==3.1.5

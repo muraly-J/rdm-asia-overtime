@@ -46,7 +46,7 @@ Files kept in `data/` are gitignored and used only by the golden test.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest   # 55 tests; golden test auto-skips without the real CSV
+.venv/bin/python -m pytest   # 84 tests; golden test auto-skips without the real CSV
 ```
 
 `requirements.txt` holds only what the app needs at runtime, so a deployment does
@@ -65,10 +65,13 @@ a URL colleagues can open:
    is tested on; 3.13 also works). Community Cloud defaults to 3.12.
 4. Deploy.
 
-**Access.** The app inherits the repo's permissions: because this repo is
-private, the app is private too. Anyone you invite views it after signing in
-with Google or a single-use emailed link, and only repo admins can redeploy or
-delete it. Invited viewers get the app, not the repository.
+**Access — the repo and the app are both public.** Anyone with the URL can open
+the page and upload a file; no sign-in stands in front of it. App visibility is a
+separate setting from repo visibility, in Community Cloud's **Share** panel, and
+it does **not** survive a delete-and-redeploy — after any redeploy from scratch,
+re-check it by hand before sharing the URL again. Whether this app should be
+access-gated at all is a data-policy decision, not a code one; this paragraph
+records what is true today, not what is advisable.
 
 **What this changes.** Running locally, attendance never leaves the machine.
 Hosted, each uploaded CSV is processed on Streamlit's servers instead. Nothing is
@@ -76,11 +79,14 @@ written to disk either way and uploads vanish with the session, but the data doe
 transit a third party — worth clearing with whoever owns data policy before
 sharing the URL.
 
-**Free-tier limits.** One private app at a time, 1 GB RAM, and the app sleeps
+**Free-tier limits.** Public apps are unlimited (the single-app cap applies to
+*private* apps, which this is not), 1 GB RAM, and the app sleeps
 after 12 hours idle (the next visitor wakes it, taking a few seconds). The
 monthly export is about 1 MB, so the memory ceiling is not a concern.
 
 Redeploys are automatic: pushing to `main` restarts the app with the new code.
+A *delete and recreate*, though, resets app visibility — re-check the **Share**
+panel afterwards, because nothing in the repo carries that setting.
 
 ## Regenerating the golden totals
 
@@ -129,6 +135,19 @@ scans are corrected at source.
 
 ## Configuration
 
-Public holidays are configured in `holidays.yml` (currently populated for 2026). Edit once a year to reflect the company's observed public holidays. The app warns if you select a month whose year has no entries.
+Public holidays are configured in `holidays.yml`, currently populated for 2026 and
+2027. Edit once a year to reflect the company's observed public holidays.
+
+The app **refuses** to calculate a month whose year has no entries rather than
+warning about it: an uncovered year is not a caveat on the figures, it is figures
+that look normal and are wrong, because every public holiday in it would be
+measured against the 9 h weekday threshold instead of 0 h. On the real June 2026
+export that is 95.35 h of overtime lost across 9 of the 12 staff, with 120 h moved
+out of the Sun/PH column into the weekday one, which is paid at a different rate.
+
+`test_holidays_cover_the_next_six_months` fails in the ordinary test run once the
+file is within six months of running out, so the gap surfaces here rather than in
+a payroll month. Sourcing the next year's gazetted dates is a manual job that no
+code can do — it is the one recurring obligation this app cannot absorb.
 
 Design: `docs/superpowers/specs/2026-07-20-overtime-calculator-design.md`

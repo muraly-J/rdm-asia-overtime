@@ -20,7 +20,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import IO, Iterable
 
-REQUIRED_COLUMNS = ("Badge No.", "Name", "Day", "Date", "Time In", "Time Out")
+REQUIRED_COLUMNS = ("Badge No.", "Name", "Day", "Date", "Time In", "Time Out", "Group")
 BANNER_PREFIX = "──"  # per-employee header row the export injects
 # Accepted renderings of one date. Deliberately excludes month-first (m/d/Y):
 # it is indistinguishable from day-first on the first twelve days of every month,
@@ -145,21 +145,41 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
             continue
         name = (row.get("Name") or "").strip()
         if not name:
+            # Padding rows are empty and harmless; one carrying clock times is a
+            # worked day that cannot be credited to anybody, so it must not vanish.
+            if (row.get("Time In") or "").strip() or (row.get("Time Out") or "").strip():
+                raise LoaderError(
+                    f"row {row_no}: a row with clock times has no Name, so its hours "
+                    "cannot be credited to anyone")
             continue  # blank padding row
 
         d = dates.parse(row["Date"], row_no, "date").date()
         # The weekday is the guard on the parse above: read a date in the wrong
         # order and this disagrees, so an export in an unanticipated format fails
         # loudly here rather than quietly moving hours into the wrong month.
-        weekday = (row.get("Day") or "").strip().lower()
-        if weekday and weekday not in (d.strftime("%a").lower(), d.strftime("%A").lower()):
+        weekday = (row.get("Day") or "").strip()
+        if not weekday:
+            raise LoaderError(
+                f"row {row_no}: the Day column is empty — it is the cross-check that "
+                f"makes {row['Date'].strip()!r} safe to read in more than one date format")
+        if weekday.lower() not in (d.strftime("%a").lower(), d.strftime("%A").lower()):
             raise LoaderError(
                 f"row {row_no}: date {row['Date'].strip()} is a {d:%a} but the Day column "
-                f"says {row['Day'].strip()} — the export's date format may have changed")
+                f"says {weekday} — the export's date format may have changed")
 
         emp = employees.setdefault(name, EmployeeAttendance(name=name))
-        if not emp.badge:
-            emp.badge = (row.get("Badge No.") or "").strip()
+        badge = (row.get("Badge No.") or "").strip()
+        # Employees are keyed on name, so two people sharing one would silently
+        # become one person with one set of hours. A badge that changes under a
+        # name is the only evidence of that the export carries. It cannot catch a
+        # collision between two staff who have no badge at all - some have none.
+        if emp.badge and badge and emp.badge != badge:
+            raise LoaderError(
+                f"row {row_no}: {name} carries badge {badge} here but {emp.badge} "
+                "earlier — probably two different people sharing a name, which this "
+                "report cannot tell apart. The name needs correcting in the "
+                "attendance system before the month can be paid.")
+        emp.badge = emp.badge or badge
         emp.dates_present.add(d)
 
         seen = atoms.setdefault((name, d), [])
@@ -174,8 +194,25 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
             raise LoaderError(
                 f"row {row_no}: {name} on {d:%d/%m/%Y} has only one of Time In / Time Out")
 
+        # The windows are unioned on the understanding that 'work' and 'site' are two
+        # views of the same day rather than two separate stints. A third kind of
+        # window would be folded into the same hours with nothing to say whether
+        # that is right. Timeless rows are left alone: theirs is legitimately blank.
+        group = (row.get("Group") or "").strip()
+        if group not in ("work", "site"):
+            raise LoaderError(
+                f"row {row_no}: unrecognised Group {group!r} on a row with clock times "
+                "— only 'work' and 'site' windows are known to combine")
+
         start = stamps.parse(raw_in, row_no, "Time In")
         end = stamps.parse(raw_out, row_no, "Time Out")
+        # A shift is charged to the day it started and the Date column decides that.
+        # Were the export ever to date a night shift by the day it ended, hours would
+        # move between day types - and across months - with nothing to show for it.
+        if start.date() != d:
+            raise LoaderError(
+                f"row {row_no}: {name}'s Time In ({raw_in}) is not on the day the Date "
+                f"column gives ({d:%d/%m/%Y}) — a shift is charged to the day it started")
         if end < start:
             raise LoaderError(
                 f"row {row_no}: {name} on {d:%d/%m/%Y} clocks out ({raw_out}) "
