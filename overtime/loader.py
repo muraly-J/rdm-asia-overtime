@@ -2,7 +2,8 @@
 
 Columns: Branch, Department, Sect., Work Pattern, Badge No., Name, Location,
 P.Pos, Day, Date, Time In, In (Map), Time Out, Out (Map), Hours, Group, Leave,
-Remark. Dates are day-first (d/m/Y); timestamps are 'd/m/Y H:M'.
+Remark. Dates and timestamps render in whatever format the export was configured
+for - day-first (d/m/Y) and ISO (Y-m-d) have both been seen - so both are read.
 
 Each row is one already-paired in/out window. Most employee-days appear twice,
 as Group='work' and Group='site' — overlapping views of the same day, not two
@@ -21,8 +22,17 @@ from typing import IO, Iterable
 
 REQUIRED_COLUMNS = ("Badge No.", "Name", "Day", "Date", "Time In", "Time Out")
 BANNER_PREFIX = "──"  # per-employee header row the export injects
-DATE_FMT = "%d/%m/%Y"
-STAMP_FMT = "%d/%m/%Y %H:%M"
+# Accepted renderings of one date. Deliberately excludes month-first (m/d/Y):
+# it is indistinguishable from day-first on the first twelve days of every month,
+# so accepting it would silently misread those dates rather than reject them. The
+# Day column cross-check below is what catches an order we have not anticipated.
+DATE_FORMATS = ("%d/%m/%Y", "%Y-%m-%d")
+DATE_LABEL = "d/m/YYYY or YYYY-MM-DD"
+STAMP_FORMATS = (
+    "%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S",
+    "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S",
+)
+STAMP_LABEL = "'d/m/YYYY H:MM' or 'YYYY-MM-DD H:MM'"
 
 # The export's remarks carry the vendor's own overtime total, e.g. "Overtime 218
 # Min". It is computed on different rules from ours - it pays hours outside the
@@ -66,11 +76,29 @@ def _open_text(source: str | Path | IO[bytes] | IO[str]) -> Iterable[str]:
     yield from data.splitlines()
 
 
-def _parse_date(value: str, row_no: int) -> date:
-    try:
-        return datetime.strptime(value.strip(), DATE_FMT).date()
-    except ValueError:
-        raise LoaderError(f"row {row_no}: unparseable date {value!r} (expected d/m/YYYY)") from None
+class _StampParser:
+    """Parses one column's timestamps, tolerating whichever format the export used.
+
+    An export renders every row the same way, so the format that worked last is
+    tried first and the rest are only reached on the first row of a file.
+    """
+
+    def __init__(self, formats: tuple[str, ...], label: str) -> None:
+        self._formats = formats
+        self._label = label
+        self._preferred = formats[0]
+
+    def parse(self, value: str, row_no: int, column: str) -> datetime:
+        text = value.strip()
+        for fmt in (self._preferred, *self._formats):
+            try:
+                parsed = datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+            self._preferred = fmt
+            return parsed
+        raise LoaderError(
+            f"row {row_no}: unparseable {column} {text!r} (expected {self._label})")
 
 
 def note_atoms(leave: str, remark: str) -> list[str]:
@@ -93,14 +121,6 @@ def note_atoms(leave: str, remark: str) -> list[str]:
     return out
 
 
-def _parse_stamp(value: str, row_no: int, column: str) -> datetime:
-    try:
-        return datetime.strptime(value.strip(), STAMP_FMT)
-    except ValueError:
-        raise LoaderError(
-            f"row {row_no}: unparseable {column} {value!r} (expected 'd/m/YYYY H:MM')") from None
-
-
 def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAttendance]:
     """Parse the attendance CSV into one record per employee, keyed on name.
 
@@ -115,6 +135,8 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
         raise LoaderError(f"missing expected column(s): {', '.join(missing)}")
 
     employees: dict[str, EmployeeAttendance] = {}
+    dates = _StampParser(DATE_FORMATS, DATE_LABEL)
+    stamps = _StampParser(STAMP_FORMATS, STAMP_LABEL)
     # Phrases per employee-day, deduplicated: the work and site rows of one day
     # usually repeat the same remark, and printing it twice reads as two findings.
     atoms: dict[tuple[str, date], list[str]] = {}
@@ -125,12 +147,15 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
         if not name:
             continue  # blank padding row
 
-        d = _parse_date(row["Date"], row_no)
-        weekday = (row.get("Day") or "").strip()
-        if weekday and d.strftime("%a") != weekday:
+        d = dates.parse(row["Date"], row_no, "date").date()
+        # The weekday is the guard on the parse above: read a date in the wrong
+        # order and this disagrees, so an export in an unanticipated format fails
+        # loudly here rather than quietly moving hours into the wrong month.
+        weekday = (row.get("Day") or "").strip().lower()
+        if weekday and weekday not in (d.strftime("%a").lower(), d.strftime("%A").lower()):
             raise LoaderError(
                 f"row {row_no}: date {row['Date'].strip()} is a {d:%a} but the Day column "
-                f"says {weekday} — the export's date format may have changed")
+                f"says {row['Day'].strip()} — the export's date format may have changed")
 
         emp = employees.setdefault(name, EmployeeAttendance(name=name))
         if not emp.badge:
@@ -149,8 +174,8 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
             raise LoaderError(
                 f"row {row_no}: {name} on {d:%d/%m/%Y} has only one of Time In / Time Out")
 
-        start = _parse_stamp(raw_in, row_no, "Time In")
-        end = _parse_stamp(raw_out, row_no, "Time Out")
+        start = stamps.parse(raw_in, row_no, "Time In")
+        end = stamps.parse(raw_out, row_no, "Time Out")
         if end < start:
             raise LoaderError(
                 f"row {row_no}: {name} on {d:%d/%m/%Y} clocks out ({raw_out}) "

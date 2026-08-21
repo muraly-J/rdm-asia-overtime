@@ -56,8 +56,13 @@ month is derived from the data rather than the filename.
 
 Columns: `Branch, Department, Sect., Work Pattern, Badge No., Name, Location,
 P.Pos, Day, Date, Time In, In (Map), Time Out, Out (Map), Hours, Group, Leave,
-Remark`. The file carries a UTF-8 BOM. `Date` is day-first (`d/m/Y`); `Time In`
-and `Time Out` are full `d/m/Y H:M` timestamps.
+Remark`. The file carries a UTF-8 BOM. `Date` and the full `Time In` / `Time Out`
+timestamps render in whichever format the export was configured for: day-first
+(`d/m/Y`, `d/m/Y H:M`) and ISO (`Y-m-d`, `Y-m-d H:M:S`) have both arrived in
+practice, and both are read. Month-first (`m/d/Y`) is deliberately **not**
+accepted — it is indistinguishable from day-first on the first twelve days of
+every month, so accepting it would silently misread those dates rather than
+reject them.
 
 The `Hours` column is **ignored** — hours are recomputed from the timestamps. It
 is not merely redundant but wrong: it reports `25:30:00` on one row and `0:00`
@@ -108,10 +113,11 @@ in the `Remark`/`Leave` columns.
    employee banner rows and blank padding rows. Rows where in == out become
    *lone scans*; rows with no times only register that the date was reported.
 
-   The `Day` column is checked against the parsed date on every row. A mismatch
-   raises rather than silently reinterpreting — this is what catches the export
-   flipping from `d/m/Y` to `m/d/Y`, which would otherwise move hours between
-   months undetected.
+   The `Day` column is checked against the parsed date on every row, in both its
+   short and long spellings (`Mon` / `Monday`). A mismatch raises rather than
+   silently reinterpreting — this is what makes accepting several date formats
+   safe, and what would catch the export flipping to `m/d/Y`, which would
+   otherwise move hours between months undetected.
 2. **Merge.** For each employee-day, union the windows: sort by start, then
    coalesce any that overlap or touch. This is what stops the `work`/`site`
    duplicate rows being counted twice. There is no gap tolerance — windows merge
@@ -249,7 +255,9 @@ becomes a named test:
   session that did close
 - Public holiday falling on a Saturday uses the 0 h threshold
 - A `Day` column disagreeing with the parsed date raises `LoaderError`
-- Dates parse day-first; the BOM is stripped; banner and blank rows are skipped
+- Day-first and ISO dates parse to the same result; an unrecognised format
+  raises and names the formats that are accepted
+- The BOM is stripped; banner and blank rows are skipped
 - Employees are keyed on name, so a blank badge does not split a person in two
 - Rest days are listed but do not count as anomalies
 - Month bucket totals sum exactly to Total OT (per-day rounding)

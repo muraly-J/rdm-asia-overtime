@@ -156,3 +156,41 @@ def test_row_number_in_error_is_the_real_csv_row():
             BANNER,
             row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30"),
             row("6/1/2026", "not a timestamp", "6/1/2026 17:30")))
+
+
+def test_iso_dates_and_timestamps_are_read():
+    # the export can be configured to render ISO dates with full weekday names
+    emps = load_attendance(csv_file(
+        row("2026-01-05", "2026-01-05 08:56:00", "2026-01-05 17:30:00", day="Monday")))
+    assert emps[0].intervals == {
+        date(2026, 1, 5): [(datetime(2026, 1, 5, 8, 56), datetime(2026, 1, 5, 17, 30))]}
+
+
+def test_iso_and_day_first_files_agree():
+    dmy = load_attendance(csv_file(row("5/1/2026", "5/1/2026 8:56", "5/1/2026 17:30")))
+    iso = load_attendance(csv_file(
+        row("2026-01-05", "2026-01-05 08:56", "2026-01-05 17:30", day="Monday")))
+    assert dmy[0].intervals == iso[0].intervals
+    assert dmy[0].dates_present == iso[0].dates_present
+
+
+def test_iso_day_column_mismatch_is_still_rejected():
+    # the weekday cross-check is what makes accepting several formats safe
+    with pytest.raises(LoaderError, match="Day column"):
+        load_attendance(csv_file(
+            row("2026-01-05", "2026-01-05 08:56", "2026-01-05 17:30", day="Friday")))
+
+
+def test_unknown_date_format_names_what_is_accepted():
+    with pytest.raises(LoaderError, match="d/m/YYYY or YYYY-MM-DD"):
+        load_attendance(csv_file(
+            row("Jan 5 2026", "5/1/2026 8:56", "5/1/2026 17:30", day="Mon")))
+
+
+def test_formats_are_decided_per_value_not_per_file():
+    # the two accepted formats differ in their separator, so neither can be
+    # mistaken for the other and a row that mixes them is still read correctly
+    emps = load_attendance(csv_file(
+        row("5/1/2026", "5/1/2026 8:56", "2026-01-05 17:30")))
+    assert emps[0].intervals == {
+        date(2026, 1, 5): [(datetime(2026, 1, 5, 8, 56), datetime(2026, 1, 5, 17, 30))]}
