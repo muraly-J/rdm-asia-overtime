@@ -121,6 +121,37 @@ def test_a_missing_end_log_suppresses_overtime_for_the_whole_day():
     assert "MISSING_PUNCH" in d.flags
 
 
+def test_double_tap_inside_closed_session_is_forgiven():
+    # "start work" 09:03 paired with the scan-out, "site in" 09:04 left dangling.
+    # The stray adds no information, so the day pays normally and is not flagged.
+    s = summarize([("2026-06-04 09:03", "2026-06-04 18:18")],
+                  dangling=["2026-06-04 09:04"])
+    d = find(s, date(2026, 6, 4))
+    assert d.flags == []
+    assert round(d.overtime_hours, 2) == 0.25
+    assert len(d.sessions) == 1  # the stray is dropped, not shown as 09:04–?
+
+
+def test_double_tap_at_scan_out_minute_is_forgiven():
+    # scan-out 22:14 and a second tap the same minute (boundary-inclusive)
+    s = summarize([("2026-06-04 09:01", "2026-06-04 22:14")],
+                  dangling=["2026-06-04 22:14"])
+    d = find(s, date(2026, 6, 4))
+    assert "MISSING_PUNCH" not in d.flags
+    assert round(d.overtime_hours, 2) == 4.22
+
+
+def test_stray_scan_outside_closed_session_still_withholds():
+    # worked 09:00-18:00, then a 21:00 scan-in with no scan-out: possibly real
+    # unrecorded evening work, so the day is flagged and its OT withheld.
+    s = summarize([("2026-06-04 09:00", "2026-06-04 18:00")],
+                  dangling=["2026-06-04 21:00"])
+    d = find(s, date(2026, 6, 4))
+    assert "MISSING_PUNCH" in d.flags
+    assert d.overtime_hours == 0.0
+    assert d.worked_hours == 9.0  # closed session's hours still reported
+
+
 def test_out_of_month_excluded_from_totals_but_listed():
     s = summarize([("2026-07-01 04:11", "2026-07-01 14:40")])
     d = find(s, date(2026, 7, 1))

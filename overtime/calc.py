@@ -72,6 +72,13 @@ def summarize_days(
         # Saturday 17:00 -> Sunday 10:00 shift is 17 h of Saturday work.
         unpaired = sorted(dangling_by_day.get(d, []))
         sessions = merge_intervals(intervals_by_day.get(d, []))
+        # A stray scan that falls inside an already-closed session is a double
+        # tap ("start work" then "site in" seconds apart), not a missing punch:
+        # the day's hours are fully determined without it, so it is dropped.
+        # A stray scan outside every closed window still withholds the day —
+        # a 21:00 scan-in after a 09:00–18:00 shift may be real unrecorded work.
+        unpaired = [t for t in unpaired
+                    if not any(s.login <= t <= s.logout for s in sessions)]
         sessions.extend(Session(t, None) for t in unpaired)
 
         dtype = day_type(d, holidays)
