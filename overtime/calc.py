@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 from .rules import THRESHOLDS, day_type
 
+# How far into the next morning a shift may run before its closing scan stops
+# looking like last night's departure and starts looking like today's arrival.
+NEXT_DAY_CUTOFF = time(7, 30)
 
 
 @dataclass(frozen=True)
@@ -61,24 +64,50 @@ def summarize_days(
     notes: dict[date, str] | None = None,
 ) -> list[DaySummary]:
     """Full pipeline for one employee: merge -> attribute -> classify."""
-    from .anomalies import day_flags  # local import: anomalies imports Session from us
+    # local import: anomalies imports Session from us
+    from .anomalies import LONG_SESSION_HOURS, day_flags
 
     notes = notes or {}
     all_days = sorted(dates_present | set(intervals_by_day) | set(dangling_by_day))
+    # Lone scans are consumed as days are walked in order: tonight's pairing
+    # removes tomorrow's closing scan before tomorrow is summarized.
+    pending = {d: sorted(ts) for d, ts in dangling_by_day.items()}
 
     summaries: list[DaySummary] = []
     for d in all_days:
         # A session belongs to the day it started on, however late it ends: a
         # Saturday 17:00 -> Sunday 10:00 shift is 17 h of Saturday work.
-        unpaired = sorted(dangling_by_day.get(d, []))
-        sessions = merge_intervals(intervals_by_day.get(d, []))
+        windows = list(intervals_by_day.get(d, []))
+        sessions = merge_intervals(windows)
         # A stray scan that falls inside an already-closed session is a double
         # tap ("start work" then "site in" seconds apart), not a missing punch:
         # the day's hours are fully determined without it, so it is dropped.
         # A stray scan outside every closed window still withholds the day —
         # a 21:00 scan-in after a 09:00–18:00 shift may be real unrecorded work.
-        unpaired = [t for t in unpaired
+        unpaired = [t for t in pending.get(d, [])
                     if not any(s.login <= t <= s.logout for s in sessions)]
+
+        # A night shift can be recorded as two lone scans on either side of
+        # midnight, which would otherwise withhold both days. The last open scan
+        # tonight pairs with the first lone scan before NEXT_DAY_CUTOFF tomorrow.
+        after = pending.get(d + timedelta(days=1))
+        if unpaired and after:
+            early = [t for t in after if t.time() <= NEXT_DAY_CUTOFF]
+            # Beyond LONG_SESSION_HOURS this is not one shift but two forgotten
+            # scan-outs, and pairing them would invent paid hours: 06:08 to 04:00
+            # the next day is 21.9 h. Refuse, and leave both days withheld.
+            if early and early[0] - unpaired[-1] <= timedelta(hours=LONG_SESSION_HOURS):
+                windows.append((unpaired.pop(), early[0]))
+                after.remove(early[0])
+                sessions = merge_intervals(windows)
+
+        # Same double-tap forgiveness across midnight: a scan lying inside a
+        # session that started yesterday is an echo of it, not a new punch.
+        if after:
+            pending[d + timedelta(days=1)] = [
+                t for t in after
+                if not any(s.login <= t <= s.logout for s in sessions)]
+
         sessions.extend(Session(t, None) for t in unpaired)
 
         dtype = day_type(d, holidays)

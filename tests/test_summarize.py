@@ -192,3 +192,52 @@ def test_totals_reconcile():
     assert t["ot_total"] == round(t["ot_weekday"] + t["ot_saturday"]
                                   + t["ot_sunday"] + t["ot_holiday"], 2)
     assert t["ot_total"] == 5.19
+
+
+def test_overnight_lone_scans_pair_into_one_shift():
+    # in at 18:00 Thursday, out at 05:00 Friday, each recorded as a lone scan:
+    # one 11 h shift charged to Thursday, and Friday is left a rest day.
+    s = summarize([], dangling=["2026-06-04 18:00", "2026-06-05 05:00"])
+    thu, fri = find(s, date(2026, 6, 4)), find(s, date(2026, 6, 5))
+    assert thu.flags == []
+    assert thu.worked_hours == 11.0
+    assert thu.overtime_hours == 2.0
+    assert len(thu.sessions) == 1
+    assert fri.worked_hours == 0.0 and fri.flags == ["NO_PUNCH"]
+
+
+def test_overnight_pair_refused_when_longer_than_16h():
+    # 06:08 then 04:00 the next day is 21.9 h: two forgotten scan-outs, not a
+    # night shift. Pairing them would pay 12.9 h of overtime out of nothing.
+    s = summarize([], dangling=["2026-06-04 06:08", "2026-06-05 04:00"])
+    thu, fri = find(s, date(2026, 6, 4)), find(s, date(2026, 6, 5))
+    assert "MISSING_PUNCH" in thu.flags and "MISSING_PUNCH" in fri.flags
+    assert thu.overtime_hours == 0.0 and fri.overtime_hours == 0.0
+    assert thu.worked_hours == 0.0
+
+
+def test_scan_after_the_cutoff_is_not_a_logout():
+    # 08:00 is the next day's arrival, not the night before's departure
+    s = summarize([], dangling=["2026-06-04 18:00", "2026-06-05 08:00"])
+    thu, fri = find(s, date(2026, 6, 4)), find(s, date(2026, 6, 5))
+    assert "MISSING_PUNCH" in thu.flags and "MISSING_PUNCH" in fri.flags
+    assert thu.worked_hours == 0.0
+
+
+def test_unexplained_scan_still_withholds_the_day_that_was_paired():
+    # 21:13 pairs with 03:11, but the 09:29 scan is still unaccounted for
+    s = summarize([], dangling=["2026-06-04 09:29", "2026-06-04 21:13",
+                                "2026-06-05 03:11"])
+    thu = find(s, date(2026, 6, 4))
+    assert "MISSING_PUNCH" in thu.flags
+    assert round(thu.worked_hours, 2) == 5.97   # the paired night shift
+    assert thu.overtime_hours == 0.0            # withheld all the same
+
+
+def test_double_tap_after_midnight_is_forgiven():
+    # the stray 04:59 falls inside a session that started the previous evening
+    s = summarize([("2026-06-04 18:00", "2026-06-05 05:00")],
+                  dangling=["2026-06-05 04:59"])
+    thu, fri = find(s, date(2026, 6, 4)), find(s, date(2026, 6, 5))
+    assert thu.flags == [] and thu.overtime_hours == 2.0
+    assert fri.flags == ["NO_PUNCH"]

@@ -20,6 +20,16 @@ If a start log has **no end log**, the day is incomplete: it is flagged
 on the sessions that did close. The hours are still shown, but nothing is paid
 until the missing scan is corrected at source.
 
+Two exceptions, both for scans that carry no information of their own. A lone
+scan lying **inside a session that already closed** is a double tap — pressing
+'start work' and 'site in' moments apart — and is dropped rather than flagged.
+And a night shift recorded as **two lone scans either side of midnight** is
+paired back together: the last unmatched scan of the evening closes against the
+first lone scan before **07:30** the next morning, and the whole shift is charged
+to the day it started. A pair spanning more than 16 h is refused — 06:08 to 04:00
+the next day is two forgotten scan-outs, not one shift — and both days stay
+withheld. Any scan left over after pairing still withholds its day.
+
 Public holidays live in `holidays.yml` — edit once a year.
 
 The export reports most days **twice**, once as `Group=work` and once as
@@ -114,7 +124,7 @@ Overtime hours are reported exact to 2 decimal places. Each employee's row shows
 
 A non-zero **Anomalies** count means the employee's total is not payable until the flagged days are checked. Flags are:
 
-- **`MISSING_PUNCH`** — a start log with no end log (the export writes it as `Time In == Time Out`, remark `No In/Out`). **The whole day's overtime is withheld**, including any session that did close, because the day cannot be verified. Hours are still displayed; the missing scan must be corrected at source before that day pays
+- **`MISSING_PUNCH`** — a start log with no end log (the export writes it as `Time In == Time Out`, remark `No In/Out`). **The whole day's overtime is withheld**, including any session that did close, because the day cannot be verified. Hours are still displayed; the missing scan must be corrected at source before that day pays. Scans that are explained — a double tap inside a closed session, or the two halves of an overnight shift — are resolved first and never reach this flag
 - **`LONG_SESSION`** — a single merged session over 16 h. The hours ARE counted toward the total, so check these before paying
 - **`ZERO_LENGTH`** — scan in and out at the same minute (defensive; the loader routes these to `MISSING_PUNCH` before they become a session)
 - **`NO_PUNCH`** — no scans that day (rest day, leave or absence); informational, not an error, and not counted in the anomaly total

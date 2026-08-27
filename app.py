@@ -24,9 +24,13 @@ FLAG_LEGEND = [
      "Someone scanned in but never scanned out.",
      "**The whole day pays no overtime**, including any complete session that day. "
      "The hours are still shown so you can see what was worked. Correct the missing "
-     "scan in the attendance system and the day will pay normally. (A doubled "
+     "scan in the attendance system and the day will pay normally.\n\n"
+     "Two kinds of lone scan are resolved before this flag is raised. A doubled "
      "scan-in *during* an already complete session — tapping 'start work' and "
-     "'site in' moments apart — is ignored, not flagged.)"),
+     "'site in' moments apart — is ignored. And an overnight shift left as two "
+     "lone scans either side of midnight is paired back up, provided the closing "
+     "scan is **before 07:30** and the shift is under 16 h; the hours count "
+     "against the evening it started."),
     ("LONG_SESSION",
      "One unbroken stretch longer than 16 hours.",
      "These hours **are** counted and paid. Almost always a forgotten scan-out rather "
