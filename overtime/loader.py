@@ -144,7 +144,11 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
     # Phrases per employee-day, deduplicated: the work and site rows of one day
     # usually repeat the same remark, and printing it twice reads as two findings.
     atoms: dict[tuple[str, date], list[str]] = {}
-    for row_no, row in enumerate(reader, start=2):  # row 1 is the header
+    echoes: list[tuple[int, str, date, datetime, datetime]] = []
+    for row in reader:
+        # the file's own line number, so it matches the row a spreadsheet shows:
+        # counting records instead drifts once the export has blank lines in it
+        row_no = reader.line_num
         if str(row.get("Branch") or "").startswith(BANNER_PREFIX):
             continue
         name = (row.get("Name") or "").strip()
@@ -204,12 +208,13 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
         # The windows are unioned on the understanding that 'work' and 'site' are
         # two views of the same day rather than two separate stints; a third kind
         # of window would be folded into the same hours with nothing to say whether
-        # that is right. One exception, seen in the real export: a lone echo of a
-        # single scan (in == out, remark 'No WorkPattern') carries a blank Group.
-        # It holds no hours, so letting it through cannot move a figure - it lands
-        # as a dangling scan and flags the day like any other lone scan.
+        # that is right. One exception, seen in the real export: an echo row with a
+        # blank Group (remark 'No WorkPattern'). As a lone scan (in == out) it holds
+        # no hours, so it lands as a dangling scan and flags the day like any other.
+        # As a full window it repeats that day's work or site row; it is checked
+        # against them once the file is read, since it can come before them.
         group = (row.get("Group") or "").strip()
-        if group not in ("work", "site") and not (group == "" and start == end):
+        if group not in ("work", "site", ""):
             raise LoaderError(
                 f"row {row_no}: unrecognised Group {group!r} on a row with clock times "
                 "— only 'work' and 'site' windows are known to combine")
@@ -226,8 +231,19 @@ def load_attendance(source: str | Path | IO[bytes] | IO[str]) -> list[EmployeeAt
                 f"before clocking in ({raw_in})")
         if start == end:
             emp.dangling.setdefault(d, []).append(start)
+        elif not group:
+            echoes.append((row_no, name, d, start, end))
         else:
             emp.intervals.setdefault(d, []).append((start, end))
+
+    # An echo that no work or site row of the same day covers would be hours
+    # nothing else vouches for; adding them could pay time never worked twice over.
+    for row_no, name, d, start, end in echoes:
+        if not any(s <= start and end <= e for s, e in employees[name].intervals.get(d, [])):
+            raise LoaderError(
+                f"row {row_no}: {name} on {d:%d/%m/%Y} has a window with no Group that "
+                "does not repeat that day's work or site record, so it is not known "
+                "whether its hours should count")
 
     for (name, d), phrases in atoms.items():
         if phrases:

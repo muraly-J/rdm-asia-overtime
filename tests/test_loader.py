@@ -291,7 +291,23 @@ def test_blank_group_is_allowed_on_a_lone_echo_scan():
     assert emps[0].dangling == {date(2026, 1, 5): [datetime(2026, 1, 5, 17, 25)]}
 
 
-def test_blank_group_on_a_real_window_is_still_rejected():
-    with pytest.raises(LoaderError, match="unrecognised Group"):
+def test_blank_group_window_repeating_the_work_row_is_ignored():
+    # August's export: a pattern-less copy of the day's window, written just
+    # before the work row it repeats. It adds nothing, and must not add hours.
+    emps = load_attendance(csv_file(
+        row("10/8/2026", "10/8/2026 8:46", "10/8/2026 19:31", day="Mon", group=""),
+        row("10/8/2026", "10/8/2026 8:46", "10/8/2026 19:31", day="Mon")))
+    assert emps[0].intervals == {
+        date(2026, 8, 10): [(datetime(2026, 8, 10, 8, 46), datetime(2026, 8, 10, 19, 31))]}
+
+
+def test_blank_group_window_nothing_else_covers_is_rejected():
+    with pytest.raises(LoaderError, match="row 3: .*no Group"):
         load_attendance(csv_file(
+            row("5/1/2026", "5/1/2026 8:58", "5/1/2026 12:00"),
             row("5/1/2026", "5/1/2026 8:58", "5/1/2026 17:25", group="")))
+
+
+def test_error_row_number_counts_blank_lines_like_a_spreadsheet():
+    with pytest.raises(LoaderError, match="row 4:"):
+        load_attendance(csv_file("", "", row("5/1/2026", "5/1/2026 8:58", "")))
